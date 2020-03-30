@@ -6,7 +6,58 @@ import time
 import utils
 import numpy as np
 import math
+import os
 
+import tensorflow as tf
+from object_detection.utils import label_map_util
+from object_detection.utils import visualization_utils as vis_util
+
+MODEL_NAME = 'inference_graph'
+CWD_PATH = os.getcwd()
+PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, 'frozen_inference_graph.pb')
+PATH_TO_LABELS = os.path.join(CWD_PATH, 'training', 'labelmap.pbtxt')
+
+NUM_CLASSES = 1
+
+## Load the label map.
+# Label maps map indices to category names, so that when our convolution
+# network predicts `5`, we know that this corresponds to `king`.
+# Here we use internal utility functions, but anything that returns a
+# dictionary mapping integers to appropriate string labels would be fine
+label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
+categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES,
+                                                            use_display_name=True)
+category_index = label_map_util.create_category_index(categories)
+
+# Load the Tensorflow model into memory.
+detection_graph = tf.Graph()
+with detection_graph.as_default():
+    od_graph_def = tf.GraphDef()
+    with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
+        serialized_graph = fid.read()
+        od_graph_def.ParseFromString(serialized_graph)
+        tf.import_graph_def(od_graph_def, name='')
+    config = tf.ConfigProto()
+    # config.gpu_options.allow_growth = True
+    config.gpu_options.per_process_gpu_memory_fraction = 0.7
+    sess = tf.Session(graph=detection_graph, config=config)
+
+# Define input and output tensors (i.e. data) for the object detection classifier
+
+# Input tensor is the image
+image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
+
+# Output tensors are the detection boxes, scores, and classes
+# Each box represents a part of the image where a particular object was detected
+detection_boxes = detection_graph.get_tensor_by_name('detection_boxes:0')
+
+# Each score represents level of confidence for each of the objects.
+# The score is shown on the result image, together with the class label.
+detection_scores = detection_graph.get_tensor_by_name('detection_scores:0')
+detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
+
+# Number of objects detected
+num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
 def L2_distance(vec1, vec2):
     return math.sqrt((vec1[0] - vec2[0])**2 + (vec1[1] - vec2[1])**2 + (vec1[2] - vec2[2])**2)
@@ -53,6 +104,15 @@ class BaselineRacer(object):
         self.finished_race = False
         self.terminated_program = False
 
+        ###################gate detection result variables#################
+        self.img_mutex = threading.Lock()
+        self.W = 0
+        self.H = 0
+        self.Mx = 0
+        self.My = 0
+        self.detect_flag = False
+        self.previous_detect_flag = False
+
     # loads desired level
     def load_level(self, level_name, sleep_sec = 2.0):
         self.level_name = level_name
@@ -75,8 +135,8 @@ class BaselineRacer(object):
         self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
         self.airsim_client.arm(vehicle_name=self.drone_name)
         n_gate = len(self.gate_poses_ground_truth)
-        self.vel_max = np.ones(n_gate) * 30.0 * 4
-        self.acc_max = np.ones(n_gate) * 15.0 * 4
+        self.vel_max = np.ones(n_gate) * 30.0
+        self.acc_max = np.ones(n_gate) * 15.0
         self.gate_passed_thresh = np.ones(n_gate) * 3
         # self.gate_passed_thresh[-1] = 0.4
         # set default values for trajectory tracker gains 
@@ -183,12 +243,78 @@ class BaselineRacer(object):
                 add_position_constraint=True, add_velocity_constraint=True, add_acceleration_constraint=False, 
                 viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name)
 
+    def gate_detection(self, img_rgb):
+        THRESHOULD = 0.90
+        with self.img_mutex:
+            #### gate detection
+            frame_expanded = np.expand_dims(img_rgb, axis=0)
+            # Perform the actual detection by running the model with the image as input
+            (boxes, scores, classes, num) = sess.run(
+                [detection_boxes, detection_scores, detection_classes, num_detections],
+                feed_dict={image_tensor: frame_expanded})
+            index = np.squeeze(scores >= THRESHOULD)
+            boxes_detected = np.squeeze(boxes)[index]   # only interested in the bounding boxes that show detection
+            # Draw the results of the detection (aka 'visualize the results')
+            N = len(boxes_detected)
+            H_list = []
+            W_list = []
+            if N >= 1:  # in the case of more than one gates are detected, we want to select the nearest gate (biggest bounding box)
+                for element in boxes_detected:
+                    H_list.append(element[2] - element[0])
+                    W_list.append(element[3] - element[1])
+                if N > 1:
+                    # print('boxes_detected', boxes_detected, boxes_detected.shape)
+                    Area = np.array(H_list) * np.array(W_list)
+                    max_Area = np.max(Area)
+                    idx_max = np.where(Area == max_Area)[0][0]  # find where the maximum area is
+                    # print(Area)
+                else:
+                    idx_max = 0
+                box_of_interest = boxes_detected[idx_max]
+                h_box = box_of_interest[2]-box_of_interest[0]
+                w_box = box_of_interest[3]-box_of_interest[1]
+                Area_box = h_box * w_box
+                # if N > 1:
+                #     print('box_of_interest', box_of_interest, box_of_interest.shape)
+                #     print('----------------------------------')
+                if Area_box <= 0.98 and Area_box >= 0.01:    # Feel free to change this number, set to 0 if don't want this effect
+                    # If we detect the box but it's still to far keep the same control command
+                    # This is to prevent the drone to track the next gate when it has not pass the current gate yet
+                    self.detect_flag = True
+                    self.H = box_of_interest[2]-box_of_interest[0]
+                    self.W = box_of_interest[3]-box_of_interest[1]
+                    self.My = (box_of_interest[2]+box_of_interest[0])/2
+                    self.Mx = (box_of_interest[3]+box_of_interest[1])/2
+                    #print("boxes_detected : ", boxes_detected, "W : ", self.W, "H", self.H, "M : ", self.Mx, " ", self.My)
+                else:
+                    self.detect_flag = False
+                    if self.next_gate_idx == 13:
+                        self.detect_big_gate = True
+                    # print("Area_box", Area_box)
+                #     print("=============== NOT DETECT ===============")
+            else:
+                # print('==================== set detect_flag to FALSE ====================')
+                self.estimate_depth = 8
+                self.detect_flag = False
+
+            vis_util.visualize_boxes_and_labels_on_image_array(
+                img_rgb,
+                np.squeeze(boxes),
+                np.squeeze(classes).astype(np.int32),
+                np.squeeze(scores),
+                category_index,
+                use_normalized_coordinates=True,
+                line_thickness=8,
+                min_score_thresh=THRESHOULD)
+
     def image_callback(self):
         # get uncompressed fpv cam image
         request = [airsim.ImageRequest("fpv_cam", airsim.ImageType.Scene, False, False)]
         response = self.airsim_client_images.simGetImages(request)
         img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8) 
         img_rgb = img_rgb_1d.reshape(response[0].height, response[0].width, 3)
+        self.gate_detection(img_rgb)
+
         if self.viz_image_cv2:
             cv2.imshow("img_rgb", img_rgb)
             cv2.waitKey(1)
@@ -247,12 +373,10 @@ class BaselineRacer(object):
             self.reset_race()
             self.finished_race == False
             self.terminated_program = True
-            
-            time.sleep(2)
-            race_again()    # restart the thread again
+            time.sleep(0.5)
+            self.race_again()
         else:
             pass
-
 
 
     def fly_to_first_gate_with_moveOnSpline(self):
@@ -317,20 +441,21 @@ class BaselineRacer(object):
             # self.odometry_callback_thread.join()
             print("Stopped odometry callback thread.")
 
-def race_again():
-    baseline_racer.start_race(1)
-    baseline_racer.reset_drone_parameter()
-    baseline_racer.takeoff_with_moveOnSpline()
+    def race_again(self):
+        self.start_race(1)
+        self.reset_drone_parameter()
+        self.takeoff_with_moveOnSpline()
+
 
 def main(args):
     # ensure you have generated the neurips planning settings file by running python generate_settings_file.py
     
     baseline_racer.load_level(args.level_name)
+    baseline_racer.start_image_callback_thread()
     baseline_racer.start_race(args.race_tier)
     baseline_racer.get_ground_truth_gate_poses()
     baseline_racer.initialize_drone()
     baseline_racer.takeoff_with_moveOnSpline()
-    baseline_racer.start_image_callback_thread()
     baseline_racer.start_odometry_callback_thread()
 
     # Comment out the following if you observe the python script exiting prematurely, and resetting the race 
@@ -343,7 +468,7 @@ if __name__ == "__main__":
     
     parser = ArgumentParser()
     parser.add_argument('--level_name', type=str, choices=["Soccer_Field_Easy", "Soccer_Field_Medium", "ZhangJiaJie_Medium", "Building99_Hard", 
-        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Soccer_Field_Easy")
+        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Soccer_Field_Medium")
     parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once","all_gates_one_by_one"], default="all_gates_at_once")
     parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
     parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=True)
