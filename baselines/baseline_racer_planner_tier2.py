@@ -108,7 +108,7 @@ class BaselineRacer(object):
         self.is_image_thread_active = False
 
         self.got_odom = False
-        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.02))
+        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.1))
         self.is_odometry_thread_active = False
 
         self.MAX_NUMBER_OF_GETOBJECTPOSE_TRIALS = 10 # see https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing/issues/383
@@ -318,7 +318,8 @@ class BaselineRacer(object):
 
         # print("before if", self.finished_race)
         if (self.finished_race == False):
-            self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val, 
+            
+            self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val,
                                   self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
                                   self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
 

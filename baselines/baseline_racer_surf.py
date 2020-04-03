@@ -30,7 +30,7 @@ categories = label_map_util.convert_label_map_to_categories(label_map, max_num_c
 category_index = label_map_util.create_category_index(categories)
 
 # Load the Tensorflow model into memory.
-detection_graph = tf.Graph() 
+detection_graph = tf.Graph()
 with detection_graph.as_default():
     od_graph_def = tf.GraphDef()
     with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
@@ -59,11 +59,26 @@ detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
 # Number of objects detected
 num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
-def L2_distance(vec1, vec2):
-    return math.sqrt((vec1[0] - vec2[0])**2 + (vec1[1] - vec2[1])**2 + (vec1[2] - vec2[2])**2)
+def L2_distance(l1, l2):
+    ''' l1 = list1, l2 = list2
+    '''
+    return math.sqrt((l1[0] - l2[0])**2 + (l1[1] - l2[1])**2 + (l1[2] - l2[2])**2)
 
-def L2_norm(vec):
-    return math.sqrt((vec[0])**2 + (vec[1])**2 + (vec[2])**2)
+def L2_norm(l):
+    ''' l = list
+    '''
+    return math.sqrt((l[0])**2 + (l[1])**2 + (l[2])**2)
+
+def convex_combination(vec1, vec2, eta):
+    ''' 0 <= eta <= 1, indicating how close it is to the vec2
+        e.g. eta = 1, vec_result = vec2
+        eta = 0, vec_result = vec1
+    '''
+    vec_result = airsim.Vector3r(0,0,0)
+    vec_result.x_val = (1-eta) * vec1.x_val + eta * vec2.x_val
+    vec_result.y_val = (1-eta) * vec1.y_val + eta * vec2.y_val
+    vec_result.z_val = (1-eta) * vec1.z_val + eta * vec2.z_val
+    return vec_result
 
 # drone_name should match the name in ~/Document/AirSim/settings.json
 class BaselineRacer(object):
@@ -73,7 +88,9 @@ class BaselineRacer(object):
         self.last_gate_idx_moveOnSpline_was_called_on = -1
         self.next_gate_idx = 0
         self.next_next_gate_idx = 1
-        self.train_lap_idx = 0
+
+        self.last_point_idx_moveOnSpline_was_called_on = -1
+        self.next_point_idx = 0
 
         self.drone_name = drone_name
         self.gate_poses_ground_truth = None
@@ -86,7 +103,7 @@ class BaselineRacer(object):
         self.airsim_client.confirmConnection()
         # we need two airsim MultirotorClient objects because the comm lib we use (rpclib) is not thread safe
         # so we poll images in a thread using one airsim MultirotorClient object
-        # and use another airsim MultirotorClient for querying state commands
+        # and use another airsim MultirotorClient for querying state commands 
         self.airsim_client_images = airsim.MultirotorClient()
         self.airsim_client_images.confirmConnection()
         self.airsim_client_odom = airsim.MultirotorClient()
@@ -97,7 +114,7 @@ class BaselineRacer(object):
         self.is_image_thread_active = False
 
         self.got_odom = False
-        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.02))
+        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.5))
         self.is_odometry_thread_active = False
 
         self.MAX_NUMBER_OF_GETOBJECTPOSE_TRIALS = 10 # see https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing/issues/383
@@ -137,15 +154,15 @@ class BaselineRacer(object):
         n_gate = len(self.gate_poses_ground_truth)
         self.vel_max = np.ones(n_gate) * 30.0
         self.acc_max = np.ones(n_gate) * 15.0
-        self.gate_passed_thresh = np.ones(n_gate) * 3
-        # self.gate_passed_thresh[-1] = 0.4
-        # set default values for trajectory tracker gains
-        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=5.0, kd_cross_track=0.0,
-                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0,
-                                                            kp_along_track=0.4, kd_along_track=0.0,
-                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0,
-                                                            kp_z_track=4.0, kd_z_track=1.5,
-                                                            kp_vel_z=0.4, kd_vel_z=0.0,
+        self.dist = np.ones(n_gate) * 3        
+
+        # set default values for trajectory tracker gains 
+        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=5.0, kd_cross_track=1.0, 
+                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0, 
+                                                            kp_along_track=0.4, kd_along_track=0.0, 
+                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0, 
+                                                            kp_z_track=2.0, kd_z_track=0.0, 
+                                                            kp_vel_z=0.4, kd_vel_z=0.0, 
                                                             kp_yaw=3.0, kd_yaw=0.1)
 
         self.airsim_client.setTrajectoryTrackerGains(traj_tracker_gains, vehicle_name=self.drone_name)
@@ -157,7 +174,6 @@ class BaselineRacer(object):
         self.last_gate_idx_moveOnSpline_was_called_on = -1
         self.next_gate_idx = 0
         self.next_next_gate_idx = 1
-        self.train_lap_idx = 0
 
         self.finished_race = False
         self.terminated_program = False
@@ -213,38 +229,39 @@ class BaselineRacer(object):
         gate_facing_vector = rotation_matrix[:,1]
         return airsim.Vector3r(scale * gate_facing_vector[0], scale * gate_facing_vector[1], scale * gate_facing_vector[2])
 
-    def fly_through_all_gates_at_once_with_moveOnSpline(self):
-        if self.level_name in ["Soccer_Field_Medium", "Soccer_Field_Easy", "ZhangJiaJie_Medium", "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"] :
-            vel_max = 30.0
-            acc_max = 15.0
+    def is_gate_passed(self):
+        self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val, 
+                              self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
+                              self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
+        dist_from_next_gate = L2_distance(self.curr_xyz, self.next_gate_xyz)
+        if dist_from_next_gate < self.dist[self.next_gate_idx]:
+            return True
+        else:
+            return False
 
-        if self.level_name == "Building99_Hard":
-            vel_max = 4.0
-            acc_max = 1.0
-        print("fly through all gate at once")
-        print(self.gate_poses_ground_truth[0].position)
-        return self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth], vel_max=vel_max, acc_max=acc_max, 
-            add_position_constraint=True, add_velocity_constraint=False, add_acceleration_constraint=False, viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name)
-
-    def fly_through_all_gates_at_once_with_moveOnSplineVelConstraints(self):
-        if self.level_name in ["Soccer_Field_Easy", "Soccer_Field_Medium", "ZhangJiaJie_Medium"]:
-            vel_max = 15.0
-            acc_max = 7.5
-            speed_through_gate = 2.5
-
-        if self.level_name == "Building99_Hard":
-            vel_max = 5.0
-            acc_max = 2.0
-            speed_through_gate = 1.0
-
-        return self.airsim_client.moveOnSplineVelConstraintsAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth], 
-                [self.get_gate_facing_vector_from_quaternion(gate_pose.orientation, scale = speed_through_gate) for gate_pose in self.gate_poses_ground_truth], 
-                vel_max=vel_max, acc_max=acc_max, 
-                add_position_constraint=True, add_velocity_constraint=True, add_acceleration_constraint=False, 
-                viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name)
+    def is_point_passed(self, point):
+        current_drone_position = self.airsim_client.simGetVehiclePose(vehicle_name=self.drone_name).position
+        current_drone_xyz = [current_drone_position.x_val, current_drone_position.y_val, current_drone_position.z_val]
+        dist_from_the_point = L2_distance(current_drone_xyz, point)
+        if dist_from_the_point < self.dist[self.next_gate_idx]:
+            return True
+        else:
+            return False
+    
+    def update_gate_idx_trackers(self):
+        self.last_gate_passed_idx += 1
+        self.next_gate_idx += 1
+        self.next_next_gate_idx += 1
+        if self.next_next_gate_idx >= len(self.gate_poses_ground_truth):
+                    self.next_next_gate_idx = 0
+        print("Update next_gate_idx to %d" % self.next_gate_idx)
+    
+    def is_race_finished(self):
+        # is the last gate in the track passed
+        return (self.last_gate_passed_idx == len(self.gate_poses_ground_truth)-1)
 
     def gate_detection(self, img_rgb):
-        THRESHOULD = 0.90
+        THRESHOULD = 0.97
         with self.img_mutex:
             #### gate detection
             frame_expanded = np.expand_dims(img_rgb, axis=0)
@@ -314,10 +331,12 @@ class BaselineRacer(object):
         img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8) 
         img_rgb = img_rgb_1d.reshape(response[0].height, response[0].width, 3)
         self.gate_detection(img_rgb)
+
         if self.viz_image_cv2:
             cv2.imshow("img_rgb", img_rgb)
             cv2.waitKey(1)
 
+    
     def odometry_callback(self):
         # in world frame:
         self.drone_state = self.airsim_client_odom.getMultirotorState()
@@ -327,45 +346,43 @@ class BaselineRacer(object):
         self.curr_xyz = [drone_position.x_val, drone_position.y_val, drone_position.z_val]
         self.got_odom = True
 
-        if self.last_gate_passed_idx == -1:
-            if (self.last_gate_idx_moveOnSpline_was_called_on == -1):
-                self.fly_to_first_gate_with_moveOnSpline()
-                self.last_gate_idx_moveOnSpline_was_called_on = 0
+        if (self.finished_race == False):
+            if self.is_gate_passed():
+                self.update_gate_idx_trackers()
+            
+            if self.is_race_finished():
+                self.finished_race = True
                 return
 
-        # print("before if", self.finished_race)
-        if (self.finished_race == False):
-            self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val, 
-                                  self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
-                                  self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
-
-            dist_from_next_gate = L2_distance(self.curr_xyz, self.next_gate_xyz)
-            # print(self.last_gate_passed_idx, self.next_gate_idx, dist_from_next_gate)
-            
-            if dist_from_next_gate < self.gate_passed_thresh[self.next_gate_idx]:
-                # The drone should change the targeted gate to the next one
-                # when it goes closed enough to the current target
-                self.last_gate_passed_idx += 1
-                self.next_gate_idx += 1
-                self.next_next_gate_idx += 1
-                # self.set_pose_of_gate_just_passed()
-                # self.set_pose_of_gate_passed_before_the_last_one()
-
-                if self.next_next_gate_idx >= len(self.gate_poses_ground_truth):
-                    self.next_next_gate_idx = 0
-
-                # if current lap is complete, generate next track
-                if (self.last_gate_passed_idx == len(self.gate_poses_ground_truth)-1):
-                    self.finished_race = True
-
-                if (not(self.last_gate_idx_moveOnSpline_was_called_on == self.next_gate_idx) and not self.finished_race):
-                    self.fly_to_next_gate_with_moveOnSpline()
-                    self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx
-
-            # in case of collision, the drone will stop
-            if L2_norm(self.curr_lin_vel) < 0.1 and self.last_gate_idx_moveOnSpline_was_called_on != 0:
-                print("Collsion case call")
+            ''' Control Part'''
+            if (self.detect_flag == True):
+                ''' Go to the center of the gate'''
+                # self.airsim_client.cancelLastTask()
                 self.fly_to_next_gate_with_moveOnSpline()
+            else:
+                ''' Go to prior of the gate'''
+                noisy_position_of_next_gate = self.gate_poses_ground_truth[self.next_gate_idx].position
+                target_position = convex_combination(drone_position, noisy_position_of_next_gate, 0.5)
+
+                if self.last_gate_passed_idx == -1:
+                    if (self.last_gate_idx_moveOnSpline_was_called_on == -1):
+                        # self.airsim_client.cancelLastTask()
+                        self.fly_to_first_point_with_moveOnSpline(target_position)
+                        self.last_gate_idx_moveOnSpline_was_called_on = 0
+                        return
+                else:
+                    
+                    if (not(self.last_gate_idx_moveOnSpline_was_called_on == self.next_gate_idx) and not self.finished_race):
+                        self.fly_to_next_point_with_moveOnSpline(target_position)
+                        self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx
+                        point = [target_position.x_val, target_position.y_val, target_position.z_val]
+
+
+                
+            # in case of collision, the drone will stop
+            # if L2_norm(self.curr_lin_vel) < 0.1 and self.last_gate_idx_moveOnSpline_was_called_on != 0:
+            #     print("Collsion case call")
+            #     self.fly_to_next_gate_with_moveOnSpline()
 
         elif (self.finished_race == True and L2_norm(self.curr_lin_vel) < 0.5):
             # race is finished
@@ -373,37 +390,74 @@ class BaselineRacer(object):
             self.finished_race == False
             self.terminated_program = True
             time.sleep(0.5)
-            self.race_again()
+            # self.race_again()
         else:
             pass
 
 
     def fly_to_first_gate_with_moveOnSpline(self):
+        print("fly_to_first_gate_with_moveOnSpline")
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
-        # print(self.curr_track_gate_poses[self.next_next_gate_idx].position)
-        self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
-                                             vel_max=self.vel_max[self.next_gate_idx],
-                                             acc_max=self.acc_max[self.next_gate_idx], 
-                                             add_position_constraint=True, 
-                                             add_velocity_constraint=False, 
-                                             add_acceleration_constraint=False, 
-                                             viz_traj=self.viz_traj, 
-                                             viz_traj_color_rgba=self.viz_traj_color_rgba, 
-                                             vehicle_name=self.drone_name)
+        # The drone starts from not moving, don't add vel and acc constraints
+        return self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
+                                                     vel_max=self.vel_max[self.next_gate_idx],
+                                                     acc_max=self.acc_max[self.next_gate_idx],
+                                                     add_position_constraint=True,
+                                                     add_velocity_constraint=False,
+                                                     add_acceleration_constraint=False,
+                                                     viz_traj=self.viz_traj,
+                                                     viz_traj_color_rgba=self.viz_traj_color_rgba,
+                                                     vehicle_name=self.drone_name)
+    
+    def fly_to_first_point_with_moveOnSpline(self, point):
+        print("fly_to_first_point_with_moveOnSpline")
+        temp = [self.gate_poses_ground_truth[self.next_gate_idx].position]
+        
+        self.airsim_client.moveOnSplineAsync([point] + temp,
+                                            vel_max=self.vel_max[self.next_gate_idx],
+                                            acc_max=self.acc_max[self.next_gate_idx],
+                                            add_position_constraint=True, 
+                                            add_velocity_constraint=False, 
+                                            add_acceleration_constraint=False, 
+                                            viz_traj=self.viz_traj, 
+                                            viz_traj_color_rgba=self.viz_traj_color_rgba, 
+                                            vehicle_name=self.drone_name)
+        point_list = [point.x_val, point.y_val, point.z_val]
+        while self.is_point_passed(point_list) == False:
+            time.sleep(0.1)
+        return 
     
     def fly_to_next_gate_with_moveOnSpline(self):
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
-        # print(self.curr_track_gate_poses[self.next_next_gate_idx].position)
-        self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
-                                             vel_max=self.vel_max[self.next_gate_idx],
-                                             acc_max=self.acc_max[self.next_gate_idx], 
-                                             add_position_constraint=True, 
-                                             add_velocity_constraint=True, 
-                                             add_acceleration_constraint=True, 
-                                             replan_from_lookahead=False,
-                                             viz_traj=self.viz_traj, 
-                                             viz_traj_color_rgba=self.viz_traj_color_rgba, 
-                                             vehicle_name=self.drone_name)
+        
+        return self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
+                                                    vel_max=self.vel_max[self.next_gate_idx],
+                                                    acc_max=self.acc_max[self.next_gate_idx], 
+                                                    add_position_constraint=True, 
+                                                    add_velocity_constraint=True, 
+                                                    add_acceleration_constraint=False, 
+                                                    replan_from_lookahead=False,
+                                                    viz_traj=self.viz_traj, 
+                                                    viz_traj_color_rgba=self.viz_traj_color_rgba, 
+                                                    vehicle_name=self.drone_name)
+
+    def fly_to_next_point_with_moveOnSpline(self, point):
+        # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
+        temp = [self.gate_poses_ground_truth[self.next_gate_idx].position]
+        self.airsim_client.moveOnSplineAsync([point] + temp, 
+                                            vel_max=self.vel_max[self.next_gate_idx],
+                                            acc_max=self.acc_max[self.next_gate_idx], 
+                                            add_position_constraint=True, 
+                                            add_velocity_constraint=True, 
+                                            add_acceleration_constraint=False,
+                                            replan_from_lookahead=False,
+                                            viz_traj=self.viz_traj, 
+                                            viz_traj_color_rgba=self.viz_traj_color_rgba, 
+                                            vehicle_name=self.drone_name)
+        point_list = [point.x_val, point.y_val, point.z_val]
+        while self.is_point_passed(point_list) == False:
+            time.sleep(0.1)
+        return 
 
     # call task() method every "period" seconds. 
     def repeat_timer_image_callback(self, task, period):

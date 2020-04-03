@@ -7,6 +7,7 @@ import utils
 import numpy as np
 import math
 import os
+import log_monitor
 
 import tensorflow as tf
 from object_detection.utils import label_map_util
@@ -151,18 +152,18 @@ class BaselineRacer(object):
         self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
         self.airsim_client.arm(vehicle_name=self.drone_name)
         n_gate = len(self.gate_poses_ground_truth)
-        self.vel_max = np.ones(n_gate) * 30.0 * 3
-        self.acc_max = np.ones(n_gate) * 15.0 * 3
-        self.dist = np.ones(n_gate) * 3        
+        self.vel_max = np.ones(n_gate) * 12
+        self.acc_max = np.ones(n_gate) * 100.0
+        self.dist = np.ones(n_gate) * 5
 
         # set default values for trajectory tracker gains 
-        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=5.0, kd_cross_track=1.0, 
-                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0, 
-                                                            kp_along_track=0.4, kd_along_track=0.0, 
-                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0, 
-                                                            kp_z_track=2.0, kd_z_track=0.0, 
-                                                            kp_vel_z=0.4, kd_vel_z=0.0, 
-                                                            kp_yaw=3.0, kd_yaw=0.1)
+        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=11.0, kd_cross_track=4.0,
+                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0,
+                                                            kp_along_track=0.4, kd_along_track=0.0,
+                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0,
+                                                            kp_z_track=6.0, kd_z_track=3.5,
+                                                            kp_vel_z=0.4, kd_vel_z=0.0,
+                                                            kp_yaw=3.0, kd_yaw=0.5)
 
         self.airsim_client.setTrajectoryTrackerGains(traj_tracker_gains, vehicle_name=self.drone_name)
         time.sleep(0.2)
@@ -180,7 +181,7 @@ class BaselineRacer(object):
         self.airsim_client.takeoffAsync().join()
 
     # like takeoffAsync(), but with moveOnSpline()
-    def takeoff_with_moveOnSpline(self, takeoff_height = 1.0):
+    def takeoff_with_moveOnSpline(self, takeoff_height=1.0):
         start_position = self.airsim_client.simGetVehiclePose(vehicle_name=self.drone_name).position
         takeoff_waypoint = airsim.Vector3r(start_position.x_val, start_position.y_val, start_position.z_val-takeoff_height)
 
@@ -314,7 +315,7 @@ class BaselineRacer(object):
         # get uncompressed fpv cam image
         request = [airsim.ImageRequest("fpv_cam", airsim.ImageType.Scene, False, False)]
         response = self.airsim_client_images.simGetImages(request)
-        img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8) 
+        img_rgb_1d = np.fromstring(response[0].image_data_uint8, dtype=np.uint8)
         img_rgb = img_rgb_1d.reshape(response[0].height, response[0].width, 3)
         self.gate_detection(img_rgb)
 
@@ -340,14 +341,10 @@ class BaselineRacer(object):
                 self.finished_race = True
                 return
 
-            # if not(self.last_gate_idx_moveOnSpline_was_called_on == self.next_gate_idx) and not self.finished_race:
-            #     self.fly_to_next_gate_with_moveOnSpline()
-            #     self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx
-
             ''' Control Part'''
             if (self.detect_flag == True):
                 ''' Go to the center of the gate'''
-                self.airsim_client.cancelLastTask()
+                # self.airsim_client.cancelLastTask()
                 self.fly_to_next_gate_with_moveOnSpline()
             else:
                 ''' Go to prior of the gate'''
@@ -363,24 +360,23 @@ class BaselineRacer(object):
                 else:
                     self.fly_to_next_point_with_moveOnSpline(target_position)
 
-                
-            # in case of collision, the drone will stop
-            # if L2_norm(self.curr_lin_vel) < 0.1 and self.last_gate_idx_moveOnSpline_was_called_on != 0:
-            #     print("Collsion case call")
-            #     self.fly_to_next_gate_with_moveOnSpline()
-
         elif (self.finished_race == True and L2_norm(self.curr_lin_vel) < 0.5):
             # race is finished
             self.reset_race()
             self.finished_race == False
             self.terminated_program = True
+            log_monitor.read_log()
+            self.stop_image_callback_thread()
+            self.stop_odometry_callback_thread()
             time.sleep(0.5)
+            score = log_monitor.read_log()
+            print(score)
             # self.race_again()
         else:
             pass
 
-
     def fly_to_first_gate_with_moveOnSpline(self):
+        print("fly_to_first_gate_with_moveOnSpline")
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
         # The drone starts from not moving, don't add vel and acc constraints
         return self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
@@ -394,6 +390,7 @@ class BaselineRacer(object):
                                                      vehicle_name=self.drone_name)
     
     def fly_to_first_point_with_moveOnSpline(self, point):
+        print("fly_to_first_point_with_moveOnSpline")
         return self.airsim_client.moveOnSplineAsync([point], 
                                                     vel_max=self.vel_max[self.next_gate_idx],
                                                     acc_max=self.acc_max[self.next_gate_idx], 
@@ -477,6 +474,7 @@ def main(args):
     baseline_racer.load_level(args.level_name)
     baseline_racer.start_image_callback_thread()
     baseline_racer.start_race(args.race_tier)
+    start_time = time.time()
     baseline_racer.get_ground_truth_gate_poses()
     baseline_racer.initialize_drone()
     baseline_racer.takeoff_with_moveOnSpline()
@@ -488,16 +486,18 @@ def main(args):
     # baseline_racer.reset_race()
 
 
+
 if __name__ == "__main__":
     
     parser = ArgumentParser()
     parser.add_argument('--level_name', type=str, choices=["Soccer_Field_Easy", "Soccer_Field_Medium", "ZhangJiaJie_Medium", "Building99_Hard", 
-        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Soccer_Field_Medium")
+        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Soccer_Field_Easy")
     parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once","all_gates_one_by_one"], default="all_gates_at_once")
     parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
     parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=True)
     parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=True)
     parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
     args = parser.parse_args()
-    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0], viz_image_cv2=args.viz_image_cv2)
+    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
+    log_monitor = log_monitor.LogMonitor()
     main(args)
