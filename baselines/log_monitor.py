@@ -46,8 +46,8 @@ class LogMonitor(object):
                 return (gate_passed_time, penalty)
             
             
-        print ("The drone did not pass the gate_idx " + gate_idx)
-        return (10000, 10000)
+        print ("    The drone did not pass the gate_idx " + gate_idx)
+        return (1000, 0)
 
 
     def get_race_time(self, drone_name):
@@ -63,6 +63,7 @@ class LogMonitor(object):
         
         assert(False), "Did not get the race time requested"
     
+
     def check_gate_missed(self):
         f = self.open_file(self.path_to_log)
         self.skip_header(f)
@@ -73,6 +74,32 @@ class LogMonitor(object):
                 return True
         f.close()
         return False
+
+
+    def check_collision(self):
+        f = self.open_file(self.path_to_log)
+        self.skip_header(f)
+        for line in f:
+            token = line.split()
+            if token[-2] == "collision_count":
+                f.close()
+                return True
+        f.close()
+        return False
+
+    def get_last_gate_idx_before_termination(self):
+        gate_idx = 1
+        f = self.open_file(self.path_to_log)
+        self.skip_header(f)
+        for line in f:
+            token = line.split()
+            if token[-2] == "gates_passed":
+                gate_idx = token[-1]
+
+        f.close()
+        # print(f"gate_idx passed before termination {int(gate_idx) - 1}")
+
+        return int(gate_idx) - 1
 
     def get_score(self, finish_time):
         '''
@@ -102,7 +129,17 @@ class LogMonitor(object):
 
         assert(False), "Did not get the score requested"
                 
-    
+    def get_current_race_time(self):
+        f = self.open_file(self.path_to_log)
+        self.skip_header(f)
+        for line in f:
+            token = line.split()
+            if not len(token) == 5:
+                break
+            current_race_time = token[2]
+
+        f.close()
+        return int(current_race_time) / 1000.
 
     def read_log(self):
         finish_time = self.get_race_time("drone_1")
@@ -115,4 +152,4 @@ class LogMonitor(object):
 
 if __name__ == "__main__":
     log_monitor = LogMonitor()
-    log_monitor.read_log()
+    print(log_monitor.get_current_race_time())
