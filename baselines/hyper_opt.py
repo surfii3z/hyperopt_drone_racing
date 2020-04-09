@@ -8,7 +8,7 @@ V_MIN = 5
 V_MAX = 25
 A_MIN = 50
 A_MAX = 200
-D_MIN = 2
+D_MIN = 3.5
 D_MAX = 9
 
 class Range(object):

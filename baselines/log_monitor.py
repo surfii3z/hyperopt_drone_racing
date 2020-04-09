@@ -4,7 +4,7 @@ import time
 
 disqualified_racers = set()
 finished_racers = set()
-PATH_TO_LOG = '/home/jedsadakorn/git/AirSim_Training/AirSimExe/Saved/Logs/RaceLogs/'
+PATH_TO_LOG = '/home/jedsadakorn/git/airsim_binary/AirSim_Training/AirSimExe/Saved/Logs/RaceLogs/'
 class LogMonitor(object):
     def __init__(self, path_to_log=PATH_TO_LOG):
         self.path_to_log = path_to_log
@@ -35,18 +35,22 @@ class LogMonitor(object):
             if token[-2] == "gates_passed" and token[0] == "drone_1" and token[-1] == gate_idx:
                 gate_passed_time = int(token[2]) / 1000.
                 counter = 1
-            elif counter == 1 and token[-2] == "collision_count":   # there is collision
-                counter = 2
+            elif counter == 1 and token[-2] == "gates_missed":   # drone missed some gate
+                f.close()
+                # print(f"    The drone missed gate: {gate_idx} ")
+                return (1000, 0)
             elif counter == 1 and not token[-2] == "collision_count":   # no collision
                 f.close()
                 return (gate_passed_time, penalty)
+            elif counter == 1 and token[-2] == "collision_count":   # there is collision
+                counter = 2
             elif counter == 2 and token[-2] == "penalty":
                 penalty = int(token[-1]) / 1000.
                 f.close()
                 return (gate_passed_time, penalty)
             
             
-        print ("    The drone did not pass the gate_idx " + gate_idx)
+        # print (f"    The drone did not pass the gate_idx: {gate_idx}")
         return (1000, 0)
 
 
@@ -63,6 +67,20 @@ class LogMonitor(object):
         
         assert(False), "Did not get the race time requested"
     
+
+    def check_gate_passed(self, idx):
+        if not isinstance(idx, str):
+            idx = str(idx)
+        f = self.open_file(self.path_to_log)
+        self.skip_header(f)
+        for line in f:
+            token = line.split()
+            if token[-2] == "gates_passed" and token[0] == "drone_1" and token[-1] == idx:
+                f.close()
+                return True
+        f.close()
+        return False
+
 
     def check_gate_missed(self):
         f = self.open_file(self.path_to_log)
@@ -130,16 +148,19 @@ class LogMonitor(object):
         assert(False), "Did not get the score requested"
                 
     def get_current_race_time(self):
+        penalty = 0
         f = self.open_file(self.path_to_log)
         self.skip_header(f)
         for line in f:
             token = line.split()
             if not len(token) == 5:
                 break
-            current_race_time = token[2]
+            elif token[-2] == "penalty":
+                penalty = int(token[-1])
+            current_race_time = int(token[2]) + penalty
 
         f.close()
-        return int(current_race_time) / 1000.
+        return current_race_time / 1000.
 
     def read_log(self):
         finish_time = self.get_race_time("drone_1")
@@ -152,4 +173,4 @@ class LogMonitor(object):
 
 if __name__ == "__main__":
     log_monitor = LogMonitor()
-    print(log_monitor.get_current_race_time())
+    print(log_monitor.get_score_at_gate("5"))
