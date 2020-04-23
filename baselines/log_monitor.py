@@ -4,7 +4,7 @@ import time
 
 disqualified_racers = set()
 finished_racers = set()
-PATH_TO_LOG = '/home/jedsadakorn/git/airsim_binary/AirSim_Training/AirSimExe/Saved/Logs/RaceLogs/'
+PATH_TO_LOG = '/home/jedsadakorn/git/airsim_binary/AirSim_Qualification/AirSimExe/Saved/Logs/RaceLogs/'
 class LogMonitor(object):
     def __init__(self, path_to_log=PATH_TO_LOG):
         self.path_to_log = path_to_log
@@ -155,7 +155,7 @@ class LogMonitor(object):
             token = line.split()
             if not len(token) == 5:
                 break
-            elif token[-2] == "penalty":
+            elif token[-2] == "penalty" and token[0] == "drone_1":
                 penalty = int(token[-1])
             current_race_time = int(token[2]) + penalty
 
