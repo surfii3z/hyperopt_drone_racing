@@ -630,8 +630,6 @@ class BaselineRacer(object):
             print("Stopped odometry callback thread.")
 
 
-
-
 def main(args):
     # ensure you have generated the neurips planning settings file by running python generate_settings_file.py
     
