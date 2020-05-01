@@ -154,7 +154,7 @@ class BaselineRacer(object):
         self.hyper_opt.best_hyper.set_d_range((D_MIN, D_MAX))
         self.hyper_opt.best_hyper.init_hypers(12, 50, 3.5)
         self.hyper_opt.best_hyper.init_time()
-        self.hyper_opt.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
+        self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
         ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
         # self.hyper_opt.best_hyper.v = np.array([12.0, 12.0, 34.98, 12.0, 20.96])
@@ -477,12 +477,24 @@ class BaselineRacer(object):
         data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
         data_logging.flush()
 
+    def get_new_hyper_for_next_race(self):
+        idx = self.hyper_opt.update_best_hyper()
+        if (idx == -1):
+            new_hyper = self.hyper_opt.random_mutation_from_best(num_mutation=2)
+        else:
+            new_hyper = self.hyper_opt.random_mutation_from_best(num_mutation=2, start_idx=idx)
+        
+        return new_hyper
+
+    def use_new_hyper_for_next_race(self, new_hyper):
+        self.hyper_opt.curr_hyper = copy.deepcopy(new_hyper)
+
     def race_again(self):
         # data logging
         self.log_curr_iter_data()
 
-        new_hyper = self.hyper_opt.get_new_hyper_for_next_race()
-        self.hyper_opt.use_new_hyper_for_next_race(new_hyper)
+        new_hyper = self.get_new_hyper_for_next_race()
+        self.use_new_hyper_for_next_race(new_hyper)
 
         self.iteration = self.iteration + 1
         self.reset_drone_parameter()

@@ -4,13 +4,6 @@ import random
 import numpy as np
 import copy
 
-V_MIN = 8.5
-V_MAX = 35
-A_MIN = 20
-A_MAX = 160
-D_MIN = 3.5
-D_MAX = 6.5
-
 class HyperParameter(object):
     def __init__(self, num):
         self.v = None
@@ -31,6 +24,12 @@ class HyperParameter(object):
         self.init_v(v_val)
         self.init_a(a_val)
         self.init_d(d_val)
+
+    def random_init_hypers(self):
+        assert not(self.v_range is None or self.a_range is None or self.d_range is None), "range is not initialized"
+        self.v = np.round(np.random.uniform(self.v_range[0], self.v_range[1], self.num_hyper), 2)
+        self.a = np.round(np.random.uniform(self.a_range[0], self.a_range[1], self.num_hyper), 2)
+        self.d = np.round(np.random.uniform(self.d_range[0], self.d_range[1], self.num_hyper), 2)
 
 
     def init_v(self, v_val):
@@ -84,25 +83,11 @@ class HyperParameter(object):
 
 
 class hyOpt(HyperParameter):
+
     def __init__(self, num):
         self.num_hyper = num
         self.curr_hyper = HyperParameter(num)
         self.best_hyper = HyperParameter(num)
-        
-
-    def use_new_hyper_for_next_race(self, new_hyper):
-        self.curr_hyper = copy.deepcopy(new_hyper)
-    
-    
-    def get_new_hyper_for_next_race(self):
-        idx = self.update_best_hyper()
-
-        if (idx == -1):
-            new_hyper = self.random_mutation_from_best(num_mutation=2)
-        else:
-            new_hyper = self.random_mutation_from_best(num_mutation=2, start_idx=idx)
-        
-        return new_hyper
         
 
     def update_best_hyper(self):
@@ -135,6 +120,7 @@ class hyOpt(HyperParameter):
     def save_curr_time(self, curr_time_list):
         self.curr_hyper.time = np.array(curr_time_list)
 
+
     def curr_win(self):
         assert (not self.best_hyper.time is None), "best time in not initialized"
         return self.curr_hyper.time[-1] < self.best_hyper.time[-1]
@@ -157,6 +143,11 @@ class hyOpt(HyperParameter):
 
     
     def random_mutation_from_best(self, num_mutation, start_idx=0):
+        '''
+            if start_idx is specified from update_best_hyper(), it will reduce the search space
+            because mutation is only allowed at the point after the gate that 
+            the best race time lost to the current race time 
+        '''
         new_hyper = copy.deepcopy(self.best_hyper)
         end_idx = self.num_hyper - 1
         for _ in range(num_mutation):
