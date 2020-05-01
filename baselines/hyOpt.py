@@ -16,6 +16,9 @@ class HyperParameter(object):
         self.v = None
         self.a = None
         self.d = None
+        self.v_range = None
+        self.a_range = None
+        self.d_range = None
         self.time = None
         self.num_hyper = num
 
@@ -47,13 +50,42 @@ class HyperParameter(object):
         self.time = np.ones(self.num_hyper) * 1000.
 
 
+    def set_v_range(self, v_range):
+        assert(v_range[0] <= v_range[1]), "v_range[0] should be less than v_range[1]"
+        self.v_range = (v_range[0], v_range[1])
+
+
+    def set_a_range(self, a_range):
+        assert(a_range[0] <= a_range[1]), "a_range[0] should be less than a_range[1]"
+        self.a_range = (a_range[0], a_range[1])
+
+
+    def set_d_range(self, d_range):
+        assert(d_range[0] <= d_range[1]), "d_range[0] should be less than d_range[1]"
+        self.d_range = (d_range[0], d_range[1])
+
+
+    def random_mutation_v_at_idx(self, idx):
+        assert(not self.v_range is None), "v_range is not initialized"
+        self.v[idx] = random.uniform(self.v_range[0], self.v_range[1])
+        self.v[idx] = round(self.v[idx], 2)
+
+
+    def random_mutation_a_at_idx(self, idx):
+        assert(not self.a_range is None), "a_range is not initialized"
+        self.a[idx] = random.uniform(self.a_range[0], self.a_range[1])
+        self.a[idx] = round(self.a[idx], 2)
+
+
+    def random_mutation_d_at_idx(self, idx):
+        assert(not self.d_range is None), "d_range is not initialized"
+        self.d[idx] = random.uniform(self.d_range[0], self.d_range[1])
+        self.d[idx] = round(self.d[idx], 2)
+
+
 class hyOpt(HyperParameter):
     def __init__(self, num):
-        self.v_range = None
-        self.a_range = None
-        self.d_range = None
         self.num_hyper = num
-
         self.curr_hyper = HyperParameter(num)
         self.best_hyper = HyperParameter(num)
         
@@ -82,16 +114,18 @@ class hyOpt(HyperParameter):
             ELSE
                 - update the best hyperparameters up until where the best hyperparameters
                   loses to the current hyperparameters (Start looking at the back)
-                - update the best race time with the current race time 
+                - update the best race time with the current race time
                   up until where the best race loses
                 - random mutation (only random after the gate that the best time loses)
         '''
         idx = -1
         if self.curr_win():
+            print("WIN")
             self.copy_curr_to_best_hyper()
             self.copy_curr_to_best_time()
 
         else:
+            print("LOSE")
             idx = self.get_curr_winning_idx()
             self.copy_curr_to_best_hyper(idx)
             self.copy_curr_to_best_time(idx)
@@ -117,18 +151,19 @@ class hyOpt(HyperParameter):
 
     def copy_curr_to_best_time(self, idx=-1):
         if idx == -1:   # the current race wins
-            self.best_hyper.time = copy.deepcopy(self.curr_hyper.time) 
+            self.best_hyper.time = copy.copy(self.curr_hyper.time)
         elif idx != 0:
             self.best_hyper.time[:idx+1] = self.curr_hyper.time[:idx+1]
 
     
     def random_mutation_from_best(self, num_mutation, start_idx=0):
         new_hyper = copy.deepcopy(self.best_hyper)
+        end_idx = self.num_hyper - 1
         for _ in range(num_mutation):
             idx_1 = random.randint(0, 2)    # choose between v, a, or d
-            idx_2 = random.randint(start_idx, self.num_hyper)
+            idx_2 = random.randint(start_idx, end_idx)
             
-            print(f"WIN random_idx_1 = {idx_1}, random_idx_2 = {idx_2}")
+            print(f"random_idx_1 = {idx_1}, random_idx_2 = {idx_2}")
 
             if idx_1 == 0:
                 new_hyper.random_mutation_v_at_idx(idx_2)
@@ -165,40 +200,7 @@ class hyOpt(HyperParameter):
                         break
                     
         print(f"Current win until at idx = {idx}")
-        return idx
-
-    def set_v_range(self, v_range):
-        assert(v_range[0] <= v_range[1]), "v_range[0] should be less than v_range[1]"
-        self.v_range = (v_range[0], v_range[1])
-
-
-    def set_a_range(self, a_range):
-        assert(a_range[0] <= a_range[1]), "a_range[0] should be less than a_range[1]"
-        self.a_range = (a_range[0], a_range[1])
-
-
-    def set_d_range(self, d_range):
-        assert(d_range[0] <= d_range[1]), "d_range[0] should be less than d_range[1]"
-        self.d_range = (d_range[0], d_range[1])
-
-
-    def random_mutation_v_at_idx(self, idx):
-        assert(not self.v_range is None), "v_range is not initialized"
-        self.v[idx] = random.uniform(self.v_range[0], self.v_range[1])
-        self.v[idx] = round(self.v[idx], 2)
-
-
-    def random_mutation_a_at_idx(self, idx):
-        assert(not self.a_range is None), "a_range is not initialized"
-        self.a[idx] = random.uniform(self.a_range[0], self.a_range[1])
-        self.a[idx] = round(self.a[idx], 2)
-
-
-    def random_mutation_d_at_idx(self, idx):
-        assert(not self.d_range is None), "d_range is not initialized"
-        self.d[idx] = random.uniform(self.d_range[0], self.d_range[1])
-        self.d[idx] = round(self.d[idx], 2)
-                    
+        return idx              
 
 if __name__ == "__main__":
     print("test hyOpt Operation")
