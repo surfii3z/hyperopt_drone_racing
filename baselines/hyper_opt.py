@@ -34,13 +34,16 @@ class HyperParameter(object):
         self.d = np.ones(num) * -1
         self.num = num
 
+
     def random_initialization(self):
         self.v = np.round(np.random.uniform(V_MIN, V_MAX, self.num), 2)
         self.a = np.round(np.random.uniform(A_MIN, A_MAX, self.num), 2)
         self.d = np.round(np.random.uniform(D_MIN, D_MAX, self.num), 2)
 
+
     def __str__(self):
         return f"v = {self.v}\na = {self.a}\nd = {self.d}"
+
 
     def random_mutation(self, max_num_mutation, last_gate_idx_before_termination):
         num_mutation = random.randint(1, max_num_mutation)
@@ -58,6 +61,7 @@ class HyperParameter(object):
                 new_d = round(Range(4, 15).random_pick(), 2)
                 self.d[parameter_idx] = new_d
     
+
     def random_mutation_at_idx(self, idx):
         '''
             given idx, modify v, a, d randomly
@@ -74,6 +78,7 @@ class HyperParameter(object):
             self.random_mutation_a_at_idx(idx)
         if c[2] == 1:
             self.random_mutation_d_at_idx(idx)
+
 
     def random_ensure_mutation_at_idx(self, idx):
         '''
@@ -96,8 +101,10 @@ class HyperParameter(object):
     def random_mutation_v_at_idx(self, idx):
         self.v[idx] = round(Range(V_MIN, V_MAX).random_pick(), 2)
     
+
     def random_mutation_a_at_idx(self, idx):
         self.a[idx] = round(Range(A_MIN, A_MAX).random_pick(), 2)
+
 
     def random_mutation_d_at_idx(self, idx):
         self.d[idx] = round(Range(D_MIN, D_MAX).random_pick(), 2)

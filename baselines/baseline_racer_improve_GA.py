@@ -9,25 +9,30 @@ import math
 import os
 import copy
 import random
-
 import log_monitor
-import hyper_opt
+import hyOpt
 
-
+## for gate detection
 import tensorflow as tf
 from object_detection.utils import label_map_util
 from object_detection.utils import visualization_utils as vis_util
 
-'''                                                             Soccer_Field_Medium
-    Gate idx 0 1 2   3      4  5  6  7  8   9  10   11               12               13        14    15 16 17 18 19 20    21    22 23 24
-                   curved        down             far right     b4 big turn left    mid-air  sharp down                    sharp up
-'''
-
-'''                                                             Qual_Tier_2
+'''                                  MAP:  Qual_Tier_2
     Gate idx 0 1    2      3 4         5                    6        7 8 9 10 11 12 13
                  going up         big left turn --------- big gate
 '''
+
+## Hyperparamters range
+V_MIN = 8.5
+V_MAX = 35
+A_MIN = 20
+A_MAX = 160
+D_MIN = 3.5
+D_MAX = 6.5
+
 FINISH_GATE_IDX = 13
+
+## for gate detection
 
 MODEL_NAME = 'inference_graph'
 CWD_PATH = os.getcwd()
@@ -37,10 +42,7 @@ PATH_TO_LABELS = os.path.join(CWD_PATH, 'training', 'labelmap.pbtxt')
 NUM_CLASSES = 1
 
 ## Load the label map.
-# Label maps map indices to category names, so that when our convolution
-# network predicts `5`, we know that this corresponds to `king`.
-# Here we use internal utility functions, but anything that returns a
-# dictionary mapping integers to appropriate string labels would be fine
+
 label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
 categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES,
                                                             use_display_name=True)
@@ -76,6 +78,7 @@ detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
 # Number of objects detected
 num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
+
 def L2_distance(l1, l2):
     ''' l1 = list1, l2 = list2
     '''
@@ -99,8 +102,8 @@ def convex_combination(vec1, vec2, eta):
 
 # drone_name should match the name in ~/Document/AirSim/settings.json
 class BaselineRacer(object):
-    def __init__(self, drone_name = "drone_1", viz_traj=True, viz_traj_color_rgba=[1.0, 0.0, 0.0, 1.0], viz_image_cv2=True):
-        # gate idx trackers
+    def __init__(self, drone_name="drone_1", viz_traj=True, viz_traj_color_rgba=[1.0, 0.0, 0.0, 1.0], viz_image_cv2=True):
+        ## gate idx trackers
         self.last_gate_passed_idx = -1
         self.last_gate_idx_moveOnSpline_was_called_on = -1
         self.next_gate_idx = 0
@@ -135,7 +138,7 @@ class BaselineRacer(object):
         self.finished_race = False
         self.terminated_program = False
 
-        ###################gate detection result variables#################
+        ################### gate detection result variables #################
         self.img_mutex = threading.Lock()
         self.W = 0
         self.H = 0
@@ -145,41 +148,32 @@ class BaselineRacer(object):
         self.previous_detect_flag = False
 
         ################# Hyper-parameter Optimization#####################
-        # self.last_race_time_arr = 1000.0
-        self.last_race_time_arr = [1000.] * (FINISH_GATE_IDX + 1)
-        self.best_race_time_arr = [1000.] * (FINISH_GATE_IDX + 1)
+        self.hyper_opt = hyOpt.hyOpt(FINISH_GATE_IDX + 1)
+        self.hyper_opt.best_hyper.set_v_range((V_MIN, V_MAX))
+        self.hyper_opt.best_hyper.set_a_range((A_MIN, A_MAX))
+        self.hyper_opt.best_hyper.set_d_range((D_MIN, D_MAX))
+        self.hyper_opt.best_hyper.init_hypers(12, 50, 3.5)
+        self.hyper_opt.best_hyper.init_time()
+        self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
-        # self.best_race_time_arr = [5.81, 7.05, 9.5, 11.67, 14.33, 17.37, 28.46, 31.95, 34.52, 36.26, 39.09, 44.93, 46.47, 47.73]
+        ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
+        # self.hyper_opt.best_hyper.v = np.array([12.0, 12.0, 34.98, 12.0, 20.96])
+        # self.hyper_opt.best_hyper.a = np.array([145.48, 50.0, 65.26, 50.0, 65.06])
+        # self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 3.5, 3.5, 2.0])
+        # self.hyper_opt.best_hyper.time = np.array([6.15, 8.25, 12.7, 16.64, 1000.0])
 
-
-        self.last_hyper = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
-        self.curr_hyper = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
-
-        self.best_hyper = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
-
-        # self.best_hyper.v = np.array([14.78, 31.76, 27.34, 13.47, 15.21, 32.34, 25.06, 15.31, 28.34, 29.81, 18.83, 11.1, 32.79, 18.19])
-        # self.best_hyper.a = np.array([195.0, 122.79, 88.06, 139.97, 74.94, 171.12, 97.03, 113.04, 148.13, 72.02, 124.21, 54.71, 123.34, 151.6])
-        # self.best_hyper.d = np.array([5.27, 5.24, 4.36, 3.5, 4.71, 4.67, 3.73, 3.93, 4.63, 4.88, 5.15, 5.94, 3.5, 2.0])
-
-
-        self.last_gate_idx_before_terminate = FINISH_GATE_IDX
         self.iteration = 1
-        self.last_idx = -1
-        
     
 
     # loads desired level
-    def load_level(self, level_name, sleep_sec = 2.0):
+    def load_level(self, level_name, sleep_sec=2.0):
         self.level_name = level_name
         self.airsim_client.simLoadLevel(self.level_name)
-        time.sleep(2)
-        
         self.airsim_client.confirmConnection() # failsafe
         time.sleep(sleep_sec) # let the environment load completely
 
     # Starts an instance of a race in your given level, if valid
     def start_race(self, tier=3):
-        time.sleep(0.5)
         self.airsim_client.simStartRace(tier)
 
     # Resets a current race: moves players to start positions, timer and penalties reset
@@ -187,17 +181,13 @@ class BaselineRacer(object):
         self.airsim_client.simResetRace()
 
     def dummy_reset(self):
-        # self.airsim_client.simPause()
         self.airsim_client.reset()
-        time.sleep(1)
-        # self.airsim_client.simUnPause() # unpause sim to simresetrace works as it's supposed to
+        time.sleep(0.1)
         self.airsim_client.simResetRace()
-        time.sleep(1)
+        time.sleep(0.1)
         self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
         self.airsim_client.arm(vehicle_name=self.drone_name)
-        # self.airsim_client.simStartRace(1)
-        # self.takeoff_with_moveOnSpline()
-        # self.get_ground_truth_gate_poses()
+
 
     # arms drone, enable APIs, set default traj tracker gains
     def initialize_drone(self):
@@ -211,6 +201,8 @@ class BaselineRacer(object):
                                                             kp_z_track=8.3, kd_z_track=3.5,
                                                             kp_vel_z=3, kd_vel_z=0.8,
                                                             kp_yaw=3.0, kd_yaw=0.5)
+
+
 
         self.airsim_client.setTrajectoryTrackerGains(traj_tracker_gains, vehicle_name=self.drone_name)
         time.sleep(0.2)
@@ -266,7 +258,7 @@ class BaselineRacer(object):
     # the "scale" parameter scales the gate facing vector accordingly, thereby dictating the speed of the velocity constraint
     def get_gate_facing_vector_from_quaternion(self, airsim_quat, scale = 1.0):
         import numpy as np
-        # convert gate quaternion to rotation matrix. 
+        # convert gate quaternion to rotation matrix
         # ref: https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion; https://www.lfd.uci.edu/~gohlke/code/transformations.py.html
         q = np.array([airsim_quat.w_val, airsim_quat.x_val, airsim_quat.y_val, airsim_quat.z_val], dtype=np.float64)
         n = np.dot(q, q)
@@ -285,7 +277,7 @@ class BaselineRacer(object):
                               self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
                               self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
         dist_from_next_gate = L2_distance(self.curr_xyz, self.next_gate_xyz)
-        if dist_from_next_gate < self.curr_hyper.d[self.next_gate_idx]:
+        if dist_from_next_gate < self.hyper_opt.curr_hyper.d[self.next_gate_idx]:
             return True
         else:
             return False
@@ -313,7 +305,7 @@ class BaselineRacer(object):
         return early_terminate_condition
 
     def is_slower_than_last_race(self):
-        early_terminate_condition = log_monitor.get_current_race_time() > self.best_race_time_arr[-1]
+        early_terminate_condition = log_monitor.get_current_race_time() > self.hyper_opt.best_hyper.time[-1]
         if early_terminate_condition:
             print("     EARLY TERMINATION: slower than the best racorded time")
         return early_terminate_condition
@@ -361,9 +353,7 @@ class BaselineRacer(object):
                 h_box = box_of_interest[2]-box_of_interest[0]
                 w_box = box_of_interest[3]-box_of_interest[1]
                 Area_box = h_box * w_box
-                # if N > 1:
-                #     print('box_of_interest', box_of_interest, box_of_interest.shape)
-                #     print('----------------------------------')
+
                 if Area_box <= 0.98 and Area_box >= 0.01:    # Feel free to change this number, set to 0 if don't want this effect
                     # If we detect the box but it's still to far keep the same control command
                     # This is to prevent the drone to track the next gate when it has not pass the current gate yet
@@ -377,10 +367,7 @@ class BaselineRacer(object):
                     self.detect_flag = False
                     if self.next_gate_idx == 13:
                         self.detect_big_gate = True
-                    # print("Area_box", Area_box)
-                #     print("=============== NOT DETECT ===============")
             else:
-                # print('==================== set detect_flag to FALSE ====================')
                 self.estimate_depth = 8
                 self.detect_flag = False
 
@@ -420,20 +407,15 @@ class BaselineRacer(object):
             if self.is_gate_passed():
                 self.update_gate_idx_trackers()
             
+            # condition to terminate the race
             if self.is_race_finished() or \
                self.is_drone_stucked() or \
                self.is_slower_than_last_race() or \
                self.is_drone_missed_some_gate():
             #    self.is_drone_collied():
-                # reached goal or drone stop or time is more than last race
-
                 self.finished_race = True
                 time.sleep(1.0)
-                self.airsim_client.moveByVelocityAsync(0, 0, 0, 1).join()   # stop the drone
-                time.sleep(0.1)
-                self.airsim_client.moveByVelocityAsync(0, 0, 0, 0.2).join()   # stop the drone
-                time.sleep(0.1)
-                self.airsim_client.moveByVelocityAsync(0, 0, 0, 0.2).join()   # stop the drone
+                self.airsim_client.moveByVelocityAsync(0, 0, 0, 2).join()   # stop the drone
 
                 return
 
@@ -450,56 +432,71 @@ class BaselineRacer(object):
                 self.fly_to_next_point_with_moveOnSpline(target_position)
 
         elif (self.finished_race == True and L2_norm(self.curr_lin_vel) < 0.5):
-            # race is finishe
-            
+            # race is finished
             
             self.finished_race == False
             self.terminated_program = True
             time.sleep(0.5)
             
-            '''                                                             Soccer_Field_Medium
-                Gate idx 0 1 2   3      4  5  6  7  8   9  10   11               12               13        14    15 16 17 18 19 20    21    22 23 24
-                            curved        down             far right     b4 big turn left    mid-air  sharp down                    sharp up
-            '''
-            
-            # score = log_monitor.get_score_at_gate(str(FINISH_GATE_IDX))
-            
-            # current_race_time = score[0] + score[1]
-            # if log_monitor.check_gate_missed():
-            #     current_race_time = 1000.0
-            
-            # print("iteration:", self.iteration, "curr_race_time_arr", score[0] + score[1], "last_race_time", self.last_race_time_arr)
             temp = [log_monitor.get_score_at_gate(str(i)) for i in range(1, FINISH_GATE_IDX + 2)]
             current_race_time = [round(score[0] + score[1], 2) for score in temp]
 
-            print(f"best: {self.best_race_time_arr}")
+            print(f"best: {self.hyper_opt.best_hyper.time.tolist()}")
             print(f"curr: {current_race_time}")
 
+            self.hyper_opt.save_curr_time(current_race_time)
             self.dummy_reset()
-            self.race_again(current_race_time)
+            self.race_again()
         else:
             pass
 
-    def race_again(self, curr_race_time_arr):
-        # To DO: Optimize the hyper-parameter
-        # print(f"curr_race_time_arr: {curr_race_time_arr}, last race time: {self.last_race_time_arr}")
+    def log_curr_iter_data(self):
+        ## For the current iteration, write the best/current hyperparameter/time to the text file
+        data_logging.write(f"\niteration: {self.iteration}\n")
+        data_logging.flush()
+        data_logging.write(f"best: {self.hyper_opt.best_hyper.time.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"time: {self.hyper_opt.curr_hyper.time.tolist()}\n")
+        data_logging.flush()
 
+        data_logging.write(f"current_hyper_parameter\n")
+        data_logging.flush()
+        data_logging.write(f"v: {self.hyper_opt.curr_hyper.v.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"a: {self.hyper_opt.curr_hyper.a.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"d: {self.hyper_opt.curr_hyper.d.tolist()}\n")
+        data_logging.flush()
+
+        data_logging.write(f"BEST_hyper_parameter\n")
+        data_logging.flush()
+        data_logging.write(f"v: {self.hyper_opt.best_hyper.v.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"a: {self.hyper_opt.best_hyper.a.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
+        data_logging.flush()
+
+    def get_new_hyper_for_next_race(self):
+        idx = self.hyper_opt.update_best_hyper()
+        if (idx == -1):
+            new_hyper = self.hyper_opt.random_mutation_from_best(num_mutation=2)
+        else:
+            new_hyper = self.hyper_opt.random_mutation_from_best(num_mutation=2, start_idx=idx)
+        
+        return new_hyper
+
+    def use_new_hyper_for_next_race(self, new_hyper):
+        self.hyper_opt.curr_hyper = copy.deepcopy(new_hyper)
+
+    def race_again(self):
         # data logging
-        data_logging.write(f"iteration: {self.iteration}, best:{self.best_race_time_arr}\n")
-        data_logging.flush()
-        data_logging.write(f"time: {curr_race_time_arr}\n")
-        data_logging.flush()
-        data_logging.write(f"v: {self.curr_hyper.v[0: FINISH_GATE_IDX+1].tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"a: {self.curr_hyper.a[0: FINISH_GATE_IDX+1].tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"d: {self.curr_hyper.d[0: FINISH_GATE_IDX+1].tolist()}\n\n")
-        data_logging.flush()
+        self.log_curr_iter_data()
 
-        new_hyper = self.update_hyper_paramters(self.last_race_time_arr, curr_race_time_arr, self.best_race_time_arr)
+        new_hyper = self.get_new_hyper_for_next_race()
+        self.use_new_hyper_for_next_race(new_hyper)
 
         self.iteration = self.iteration + 1
-        self.initialize_drone_hyper_parameter(new_hyper)
         self.reset_drone_parameter()
         self.start_race(1)
 
@@ -510,95 +507,11 @@ class BaselineRacer(object):
         self.get_ground_truth_gate_poses()
 
 
-    def update_hyper_paramters(self, last_race_time_arr, curr_race_time_arr, best_race_time_arr):
-
-        # print("curr_hyper")
-        # print(f"v: {self.curr_hyper.v.tolist()}")
-        # print(f"a: {self.curr_hyper.a.tolist()}")
-        # print(f"d: {self.curr_hyper.d.tolist()}")
-        if curr_race_time_arr[-1] < best_race_time_arr[-1]: # wins
-            # print("win")
-            self.best_hyper = copy.deepcopy(self.curr_hyper)
-
-            # print("best_hyper")
-            # print(f"v: {self.best_hyper.v.tolist()}")
-            # print(f"a: {self.best_hyper.a.tolist()}")
-            # print(f"d: {self.best_hyper.d.tolist()}")
-            new_hyper = copy.deepcopy(self.curr_hyper)
-
-            # print("new_hyper BEFORE modify")
-            # print(f"new_hyper.v: {new_hyper.v.tolist()}")
-            # print(f"new_hyper.a: {new_hyper.a.tolist()}")
-            # print(f"new_hyper.d: {new_hyper.d.tolist()}")
-
-            random_idx = random.randint(0, FINISH_GATE_IDX)
-            print(f"WIN: random_idx = {random_idx}")
-            new_hyper.random_ensure_mutation_at_idx(random_idx)
-            
-            for idx in range(FINISH_GATE_IDX + 1):
-                if curr_race_time_arr[idx] != 1000 and abs(curr_race_time_arr[idx] < self.best_race_time_arr[idx]) > 0.28:
-                    self.best_race_time_arr[idx] = round(curr_race_time_arr[idx], 2)
-        
-        else:
-            # print("best_hyper")
-            # print(f"v: {self.best_hyper.v.tolist()}")
-            # print(f"a: {self.best_hyper.a.tolist()}")
-            # print(f"d: {self.best_hyper.d.tolist()}")
-            self.last_hyper = copy.deepcopy(self.curr_hyper)
-            new_hyper = copy.deepcopy(self.best_hyper)
-            for idx in range(FINISH_GATE_IDX + 1):
-                if curr_race_time_arr[idx] < self.best_race_time_arr[idx] and abs(self.best_race_time_arr[idx] - curr_race_time_arr[idx]) > 0.28:
-                    # copy the winning parameters
-                    self.best_race_time_arr[idx] = round(curr_race_time_arr[idx], 2)
-                    new_hyper.v[idx] = self.curr_hyper.v[idx]
-                    new_hyper.a[idx] = self.curr_hyper.a[idx]
-                    new_hyper.d[idx] = self.curr_hyper.d[idx]
-
-                    # update the value stored
-                    self.best_hyper.v[idx] = self.curr_hyper.v[idx]
-                    self.best_hyper.a[idx] = self.curr_hyper.a[idx]
-                    self.best_hyper.d[idx] = self.curr_hyper.d[idx]
-                elif abs(self.best_race_time_arr[idx] - curr_race_time_arr[idx]) <= 0.28:
-                    new_hyper.v[idx] = self.best_hyper.v[idx]
-                    new_hyper.a[idx] = self.best_hyper.a[idx]
-                    new_hyper.d[idx] = self.best_hyper.d[idx]
-                else:
-                    break
-
-            # print("new_hyper BEFORE modify")
-            # print(f"new_hyper.v: {new_hyper.v.tolist()}")
-            # print(f"new_hyper.a: {new_hyper.a.tolist()}")
-            # print(f"new_hyper.d: {new_hyper.d.tolist()}")
-            
-            print(f"idx = {idx}")
-            i = idx
-            self.last_idx = i
-
-            for j in range(i, FINISH_GATE_IDX + 1):
-                new_hyper.random_mutation_at_idx(j)
-
-            # mutation
-            for i in range(0, i):
-                if random.random() < 0.1:
-                    print(f"mutation at idx = {i}")
-                    data_logging.write(f"mutation at idx = {i}\n")
-                    data_logging.flush()
-                    new_hyper.random_ensure_mutation_at_idx(i)
-
-        new_hyper.d[-1] = 2
-        # print("new_hyper AFTER modify")
-        # print(f"new_hyper.v: {new_hyper.v.tolist()}")
-        # print(f"new_hyper.a: {new_hyper.a.tolist()}")
-        # print(f"new_hyper.d: {new_hyper.d.tolist()}")
-        self.last_hyper = copy.deepcopy(self.curr_hyper)
-        self.last_race_time_arr = copy.copy(curr_race_time_arr)
-        return new_hyper
-
     def fly_to_next_gate_with_moveOnSpline(self):
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
         return self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
-                                                    vel_max=self.curr_hyper.v[self.next_gate_idx],
-                                                    acc_max=self.curr_hyper.a[self.next_gate_idx], 
+                                                    vel_max=self.hyper_opt.curr_hyper.v[self.next_gate_idx],
+                                                    acc_max=self.hyper_opt.curr_hyper.a[self.next_gate_idx], 
                                                     add_position_constraint=True, 
                                                     add_velocity_constraint=True, 
                                                     add_acceleration_constraint=True, 
@@ -611,8 +524,8 @@ class BaselineRacer(object):
     def fly_to_next_point_with_moveOnSpline(self, point):
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
         return self.airsim_client.moveOnSplineAsync([point],
-                                                    vel_max=self.curr_hyper.v[self.next_gate_idx],
-                                                    acc_max=self.curr_hyper.a[self.next_gate_idx], 
+                                                    vel_max=self.hyper_opt.curr_hyper.v[self.next_gate_idx],
+                                                    acc_max=self.hyper_opt.curr_hyper.a[self.next_gate_idx], 
                                                     add_position_constraint=True, 
                                                     add_velocity_constraint=True, 
                                                     add_acceleration_constraint=True, 
@@ -657,8 +570,6 @@ class BaselineRacer(object):
             print("Stopped odometry callback thread.")
 
 
-
-
 def main(args):
     # ensure you have generated the neurips planning settings file by running python generate_settings_file.py
     
@@ -672,20 +583,8 @@ def main(args):
     baseline_racer.airsim_client.disableApiControl(vehicle_name="drone_2")
     baseline_racer.airsim_client.disarm(vehicle_name="drone_2")
     # hyper parameter initialization
-    new_hyper = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
-    new_hyper.v = np.ones(FINISH_GATE_IDX + 1) * 12
-    new_hyper.a = np.ones(FINISH_GATE_IDX + 1) * 50
-    new_hyper.d = np.ones(FINISH_GATE_IDX + 1) * 3.5
-    new_hyper.d[-1] = 2
 
-    # new_hyper.v = np.array([14.78, 31.76, 27.34, 13.47, 15.21, 32.34, 25.06, 15.31, 28.34, 29.81, 18.83, 11.1, 32.79, 18.19])
-    # new_hyper.a = np.array([195.0, 122.79, 88.06, 139.97, 74.94, 171.12, 97.03, 113.04, 148.13, 72.02, 124.21, 54.71, 123.34, 151.6])
-    # new_hyper.d = np.array([5.27, 5.24, 4.36, 3.5, 4.71, 4.67, 3.73, 3.93, 4.63, 4.88, 5.15, 5.94, 3.5, 2.0])
-    # new_hyper.d[-1] = 2
-
-
-    baseline_racer.last_hyper = copy.deepcopy(new_hyper)
-    baseline_racer.initialize_drone_hyper_parameter(new_hyper)
+    # baseline_racer.initialize_drone_hyper_parameter(baseline_racer.hyper_opt.best_hyper)
     
     baseline_racer.takeoff_with_moveOnSpline()
     baseline_racer.start_odometry_callback_thread()
@@ -708,8 +607,5 @@ if __name__ == "__main__":
     baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
     log_monitor = log_monitor.LogMonitor()
     data_logging = open("data_logging.txt", "w")
-
-    hyper_parameter_last = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
-    hyper_parameter_curr = hyper_opt.HyperParameter(FINISH_GATE_IDX + 1)
 
     main(args)

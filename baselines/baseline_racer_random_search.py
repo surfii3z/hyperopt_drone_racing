@@ -7,10 +7,32 @@ import utils
 import numpy as np
 import math
 import os
+import copy
+import random
+import log_monitor
+import hyOpt
 
+## for gate detection
 import tensorflow as tf
 from object_detection.utils import label_map_util
 from object_detection.utils import visualization_utils as vis_util
+
+'''                                  MAP:  Qual_Tier_2
+    Gate idx 0 1    2      3 4         5                    6        7 8 9 10 11 12 13
+                 going up         big left turn --------- big gate
+'''
+
+## Hyperparamters range
+V_MIN = 8.5
+V_MAX = 35
+A_MIN = 20
+A_MAX = 160
+D_MIN = 3.5
+D_MAX = 6.5
+
+FINISH_GATE_IDX = 13
+
+## for gate detection
 
 MODEL_NAME = 'inference_graph'
 CWD_PATH = os.getcwd()
@@ -20,10 +42,7 @@ PATH_TO_LABELS = os.path.join(CWD_PATH, 'training', 'labelmap.pbtxt')
 NUM_CLASSES = 1
 
 ## Load the label map.
-# Label maps map indices to category names, so that when our convolution
-# network predicts `5`, we know that this corresponds to `king`.
-# Here we use internal utility functions, but anything that returns a
-# dictionary mapping integers to appropriate string labels would be fine
+
 label_map = label_map_util.load_labelmap(PATH_TO_LABELS)
 categories = label_map_util.convert_label_map_to_categories(label_map, max_num_classes=NUM_CLASSES,
                                                             use_display_name=True)
@@ -59,21 +78,36 @@ detection_classes = detection_graph.get_tensor_by_name('detection_classes:0')
 # Number of objects detected
 num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
-def L2_distance(vec1, vec2):
-    return math.sqrt((vec1[0] - vec2[0])**2 + (vec1[1] - vec2[1])**2 + (vec1[2] - vec2[2])**2)
 
-def L2_norm(vec):
-    return math.sqrt((vec[0])**2 + (vec[1])**2 + (vec[2])**2)
+def L2_distance(l1, l2):
+    ''' l1 = list1, l2 = list2
+    '''
+    return math.sqrt((l1[0] - l2[0])**2 + (l1[1] - l2[1])**2 + (l1[2] - l2[2])**2)
+
+def L2_norm(l):
+    ''' l = list
+    '''
+    return math.sqrt((l[0])**2 + (l[1])**2 + (l[2])**2)
+
+def convex_combination(vec1, vec2, eta):
+    ''' 0 <= eta <= 1, indicating how close it is to the vec2
+        e.g. eta = 1, vec_result = vec2
+        eta = 0, vec_result = vec1
+    '''
+    vec_result = airsim.Vector3r(0,0,0)
+    vec_result.x_val = (1-eta) * vec1.x_val + eta * vec2.x_val
+    vec_result.y_val = (1-eta) * vec1.y_val + eta * vec2.y_val
+    vec_result.z_val = (1-eta) * vec1.z_val + eta * vec2.z_val
+    return vec_result
 
 # drone_name should match the name in ~/Document/AirSim/settings.json
 class BaselineRacer(object):
-    def __init__(self, drone_name = "drone_1", viz_traj=True, viz_traj_color_rgba=[1.0, 0.0, 0.0, 1.0], viz_image_cv2=True):
-        # gate idx trackers
+    def __init__(self, drone_name="drone_1", viz_traj=True, viz_traj_color_rgba=[1.0, 0.0, 0.0, 1.0], viz_image_cv2=True):
+        ## gate idx trackers
         self.last_gate_passed_idx = -1
         self.last_gate_idx_moveOnSpline_was_called_on = -1
         self.next_gate_idx = 0
         self.next_next_gate_idx = 1
-        self.train_lap_idx = 0
 
         self.drone_name = drone_name
         self.gate_poses_ground_truth = None
@@ -86,7 +120,7 @@ class BaselineRacer(object):
         self.airsim_client.confirmConnection()
         # we need two airsim MultirotorClient objects because the comm lib we use (rpclib) is not thread safe
         # so we poll images in a thread using one airsim MultirotorClient object
-        # and use another airsim MultirotorClient for querying state commands 
+        # and use another airsim MultirotorClient for querying state commands
         self.airsim_client_images = airsim.MultirotorClient()
         self.airsim_client_images.confirmConnection()
         self.airsim_client_odom = airsim.MultirotorClient()
@@ -97,14 +131,14 @@ class BaselineRacer(object):
         self.is_image_thread_active = False
 
         self.got_odom = False
-        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.1))
+        self.odometry_callback_thread = threading.Thread(target=self.repeat_timer_odometry_callback, args=(self.odometry_callback, 0.5))
         self.is_odometry_thread_active = False
 
         self.MAX_NUMBER_OF_GETOBJECTPOSE_TRIALS = 10 # see https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing/issues/383
         self.finished_race = False
         self.terminated_program = False
 
-        ###################gate detection result variables#################
+        ################### gate detection result variables #################
         self.img_mutex = threading.Lock()
         self.W = 0
         self.H = 0
@@ -112,28 +146,29 @@ class BaselineRacer(object):
         self.My = 0
         self.detect_flag = False
         self.previous_detect_flag = False
-        self.previous_detect_flag = False
 
-        ################# PD control variables ###################
-        self.chk_first_flag = True
-        self.prev_time = 0
-        self.curr_time = 0
-        self.distance_y_prev = 0
-        self.distance_y_curr = 0
-        self.distance_z_prev = 0
-        self.distance_z_curr = 0
-        self.desired_yaw_prev = 0
-        self.desired_yaw_curr = 0
+        ################# Hyper-parameter Optimization#####################
+        self.hyper_opt = hyOpt.hyOpt(FINISH_GATE_IDX + 1)
+        self.hyper_opt.best_hyper.set_v_range((V_MIN, V_MAX))
+        self.hyper_opt.best_hyper.set_a_range((A_MIN, A_MAX))
+        self.hyper_opt.best_hyper.set_d_range((D_MIN, D_MAX))
+        self.hyper_opt.best_hyper.init_hypers(12, 50, 3.5)
+        self.hyper_opt.best_hyper.init_time()
+        self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
-        self.vision_lam = 0.3
-        self.prev_vel = 0
+        ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
+        # self.hyper_opt.best_hyper.v = np.array([12.0, 12.0, 34.98, 12.0, 20.96])
+        # self.hyper_opt.best_hyper.a = np.array([145.48, 50.0, 65.26, 50.0, 65.06])
+        # self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 3.5, 3.5, 2.0])
+        # self.hyper_opt.best_hyper.time = np.array([6.15, 8.25, 12.7, 16.64, 1000.0])
+
+        self.iteration = 1
+    
 
     # loads desired level
-    def load_level(self, level_name, sleep_sec = 2.0):
+    def load_level(self, level_name, sleep_sec=2.0):
         self.level_name = level_name
         self.airsim_client.simLoadLevel(self.level_name)
-        time.sleep(2)
-        
         self.airsim_client.confirmConnection() # failsafe
         time.sleep(sleep_sec) # let the environment load completely
 
@@ -145,34 +180,42 @@ class BaselineRacer(object):
     def reset_race(self):
         self.airsim_client.simResetRace()
 
+    def dummy_reset(self):
+        self.airsim_client.reset()
+        time.sleep(0.1)
+        self.airsim_client.simResetRace()
+        time.sleep(0.1)
+        self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
+        self.airsim_client.arm(vehicle_name=self.drone_name)
+
+
     # arms drone, enable APIs, set default traj tracker gains
     def initialize_drone(self):
         self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
         self.airsim_client.arm(vehicle_name=self.drone_name)
-        n_gate = len(self.gate_poses_ground_truth)
-        self.vel_max = np.ones(n_gate) * 30.0 * 3
-        self.acc_max = np.ones(n_gate) * 15.0 * 3
-        self.gate_passed_thresh = np.ones(n_gate) * 1
-        # self.gate_passed_thresh[-1] = 0.4
-        # set default values for trajectory tracker gains 
-        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=5.0, kd_cross_track=1.0, 
-                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0, 
-                                                            kp_along_track=0.4, kd_along_track=0.0, 
-                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0, 
-                                                            kp_z_track=2.0, kd_z_track=0.0, 
-                                                            kp_vel_z=0.4, kd_vel_z=0.0, 
-                                                            kp_yaw=3.0, kd_yaw=0.1)
+
+        traj_tracker_gains = airsim.TrajectoryTrackerGains(kp_cross_track=11.0, kd_cross_track=4.0,
+                                                            kp_vel_cross_track=3.0, kd_vel_cross_track=0.0,
+                                                            kp_along_track=0.4, kd_along_track=0.0,
+                                                            kp_vel_along_track=0.04, kd_vel_along_track=0.0,
+                                                            kp_z_track=8.3, kd_z_track=3.5,
+                                                            kp_vel_z=3, kd_vel_z=0.8,
+                                                            kp_yaw=3.0, kd_yaw=0.5)
+
+
 
         self.airsim_client.setTrajectoryTrackerGains(traj_tracker_gains, vehicle_name=self.drone_name)
         time.sleep(0.2)
     
+    def initialize_drone_hyper_parameter(self, hyper_parameter):
+        self.curr_hyper = copy.deepcopy(hyper_parameter)
+
     def reset_drone_parameter(self):
         # gate idx trackers
         self.last_gate_passed_idx = -1
         self.last_gate_idx_moveOnSpline_was_called_on = -1
         self.next_gate_idx = 0
         self.next_next_gate_idx = 1
-        self.train_lap_idx = 0
 
         self.finished_race = False
         self.terminated_program = False
@@ -181,7 +224,7 @@ class BaselineRacer(object):
         self.airsim_client.takeoffAsync().join()
 
     # like takeoffAsync(), but with moveOnSpline()
-    def takeoff_with_moveOnSpline(self, takeoff_height = 1.0):
+    def takeoff_with_moveOnSpline(self, takeoff_height=1.0):
         start_position = self.airsim_client.simGetVehiclePose(vehicle_name=self.drone_name).position
         takeoff_waypoint = airsim.Vector3r(start_position.x_val, start_position.y_val, start_position.z_val-takeoff_height)
 
@@ -197,6 +240,7 @@ class BaselineRacer(object):
         gate_indices_bad = [int(gate_name.split('_')[0][4:]) for gate_name in gate_names_sorted_bad]
         gate_indices_correct = sorted(range(len(gate_indices_bad)), key=lambda k: gate_indices_bad[k])
         self.gate_object_names_sorted = [gate_names_sorted_bad[gate_idx] for gate_idx in gate_indices_correct]
+        self.n_gate = len(self.gate_object_names_sorted)
         self.gate_poses_ground_truth = []
         for gate_name in self.gate_object_names_sorted:
             curr_pose = self.airsim_client.simGetObjectPose(gate_name)
@@ -210,11 +254,11 @@ class BaselineRacer(object):
             assert not math.isnan(curr_pose.position.z_val), f"ERROR: {gate_name} curr_pose.position.z_val is still {curr_pose.position.z_val} after {counter} trials"
             self.gate_poses_ground_truth.append(curr_pose)
 
-    # this is utility function to get a velocity constraint which can be passed to moveOnSplineVelConstraints() 
+    # this is utility function to get a velocity constraint which can be passed to moveOnSplineVelConstraints()
     # the "scale" parameter scales the gate facing vector accordingly, thereby dictating the speed of the velocity constraint
     def get_gate_facing_vector_from_quaternion(self, airsim_quat, scale = 1.0):
         import numpy as np
-        # convert gate quaternion to rotation matrix. 
+        # convert gate quaternion to rotation matrix
         # ref: https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion; https://www.lfd.uci.edu/~gohlke/code/transformations.py.html
         q = np.array([airsim_quat.w_val, airsim_quat.x_val, airsim_quat.y_val, airsim_quat.z_val], dtype=np.float64)
         n = np.dot(q, q)
@@ -228,25 +272,58 @@ class BaselineRacer(object):
         gate_facing_vector = rotation_matrix[:,1]
         return airsim.Vector3r(scale * gate_facing_vector[0], scale * gate_facing_vector[1], scale * gate_facing_vector[2])
 
-    def get_world_frame_vel_from_drone_frame_vel(self, airsim_quat, velocity):
-           import numpy as np
-           # convert gate quaternion to rotation matrix.
-           # ref: https://en.wikipedia.org/wiki/Rotation_matrix#Quaternion; https://www.lfd.uci.edu/~gohlke/code/transformations.py.html
-           q = np.array([airsim_quat.w_val, airsim_quat.x_val, airsim_quat.y_val, airsim_quat.z_val], dtype=np.float64)
-           n = np.dot(q, q)
-           if n < np.finfo(float).eps:
-               return airsim.Vector3r(0.0, 1.0, 0.0)
-           q *= np.sqrt(2.0 / n)
-           q = np.outer(q, q)
-           rotation_matrix = np.array([[1.0-q[2, 2]-q[3, 3],     q[1, 2]-q[3, 0],     q[1, 3]+q[2, 0]],
-                                       [    q[1, 2]+q[3, 0], 1.0-q[1, 1]-q[3, 3],     q[2, 3]-q[1, 0]],
-                                       [    q[1, 3]-q[2, 0],     q[2, 3]+q[1, 0], 1.0-q[1, 1]-q[2, 2]]])
-           drone_frame_vel_array = np.array([velocity.x_val, velocity.y_val, velocity.z_val])
-           world_vel = np.matmul(rotation_matrix, drone_frame_vel_array)
-           return airsim.Vector3r(world_vel[0], world_vel[1], world_vel[2])
+    def is_gate_passed(self):
+        self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val,
+                              self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
+                              self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
+        dist_from_next_gate = L2_distance(self.curr_xyz, self.next_gate_xyz)
+        if dist_from_next_gate < self.hyper_opt.curr_hyper.d[self.next_gate_idx]:
+            return True
+        else:
+            return False
+    
+    def update_gate_idx_trackers(self):
+        self.last_gate_passed_idx += 1
+        self.next_gate_idx += 1
+        self.next_next_gate_idx += 1
+        # print("Update next_gate_idx to %d" % self.next_gate_idx)
+    
+    def is_race_finished(self):
+        '''                                                             Soccer_Field_Medium
+            Gate idx 0 1 2   3      4  5  6  7  8   9  10   11               12               13        14       15 16 17 18 19 20   21     22 23 24
+                           curved        down             far right     b4 big turn left    mid-air  sharp down                    sharp up
+        '''
+        terminate_condition = self.last_gate_passed_idx == FINISH_GATE_IDX
+        if terminate_condition:
+            print("     FINISH the race")
+        return terminate_condition
+
+    def is_drone_stucked(self):
+        early_terminate_condition = L2_norm(self.curr_lin_vel) < 0.05
+        if early_terminate_condition:
+            print("     EARLY TERMINATION: drone stucked")
+        return early_terminate_condition
+
+    def is_slower_than_last_race(self):
+        early_terminate_condition = log_monitor.get_current_race_time() > self.hyper_opt.best_hyper.time[-1]
+        if early_terminate_condition:
+            print("     EARLY TERMINATION: slower than the best racorded time")
+        return early_terminate_condition
+
+    def is_drone_missed_some_gate(self):
+        early_terminate_condition = log_monitor.check_gate_missed()
+        if early_terminate_condition:
+            print("     EARLY TERMINATION: drone missed some gate")
+        return early_terminate_condition
+
+    def is_drone_collied(self):
+        early_terminate_condition = log_monitor.check_collision()
+        if early_terminate_condition:
+            print("     EARLY TERMINATION: drone collided")
+        return early_terminate_condition
 
     def gate_detection(self, img_rgb):
-        THRESHOULD = 0.90
+        THRESHOULD = 0.97
         with self.img_mutex:
             #### gate detection
             frame_expanded = np.expand_dims(img_rgb, axis=0)
@@ -276,9 +353,7 @@ class BaselineRacer(object):
                 h_box = box_of_interest[2]-box_of_interest[0]
                 w_box = box_of_interest[3]-box_of_interest[1]
                 Area_box = h_box * w_box
-                # if N > 1:
-                #     print('box_of_interest', box_of_interest, box_of_interest.shape)
-                #     print('----------------------------------')
+
                 if Area_box <= 0.98 and Area_box >= 0.01:    # Feel free to change this number, set to 0 if don't want this effect
                     # If we detect the box but it's still to far keep the same control command
                     # This is to prevent the drone to track the next gate when it has not pass the current gate yet
@@ -292,10 +367,7 @@ class BaselineRacer(object):
                     self.detect_flag = False
                     if self.next_gate_idx == 13:
                         self.detect_big_gate = True
-                    # print("Area_box", Area_box)
-                #     print("=============== NOT DETECT ===============")
             else:
-                # print('==================== set detect_flag to FALSE ====================')
                 self.estimate_depth = 8
                 self.detect_flag = False
 
@@ -321,6 +393,7 @@ class BaselineRacer(object):
             cv2.imshow("img_rgb", img_rgb)
             cv2.waitKey(1)
 
+    
     def odometry_callback(self):
         # in world frame:
         self.drone_state = self.airsim_client_odom.getMultirotorState()
@@ -330,167 +403,141 @@ class BaselineRacer(object):
         self.curr_xyz = [drone_position.x_val, drone_position.y_val, drone_position.z_val]
         self.got_odom = True
 
-        if self.last_gate_passed_idx == -1:
-            if (self.last_gate_idx_moveOnSpline_was_called_on == -1):
-                self.fly_to_first_gate_with_moveOnSpline()
-                self.last_gate_idx_moveOnSpline_was_called_on = 0
+        if (self.finished_race == False):
+            if self.is_gate_passed():
+                self.update_gate_idx_trackers()
+            
+            # condition to terminate the race
+            if self.is_race_finished() or \
+               self.is_drone_stucked() or \
+               self.is_slower_than_last_race() or \
+               self.is_drone_missed_some_gate():
+            #    self.is_drone_collied():
+                self.finished_race = True
+                time.sleep(1.0)
+                self.airsim_client.moveByVelocityAsync(0, 0, 0, 2).join()   # stop the drone
+
                 return
 
-        # print("before if", self.finished_race)
-        if (self.finished_race == False):
-            self.next_gate_xyz = [self.gate_poses_ground_truth[self.next_gate_idx].position.x_val, 
-                                  self.gate_poses_ground_truth[self.next_gate_idx].position.y_val,
-                                  self.gate_poses_ground_truth[self.next_gate_idx].position.z_val]
-
-            dist_from_next_gate = L2_distance(self.curr_xyz, self.next_gate_xyz)
-            # print(self.last_gate_passed_idx, self.next_gate_idx, dist_from_next_gate)
-            
-            if dist_from_next_gate < self.gate_passed_thresh[self.next_gate_idx]:
-                # The drone should change the targeted gate to the next one
-                # when it goes closed enough to the current target
-                self.last_gate_passed_idx += 1
-                self.next_gate_idx += 1
-                self.next_next_gate_idx += 1
-                print("Update next gate idx to %d" % self.next_gate_idx)
-                # self.set_pose_of_gate_just_passed()
-                # self.set_pose_of_gate_passed_before_the_last_one()
-
-                if self.next_next_gate_idx >= len(self.gate_poses_ground_truth):
-                    self.next_next_gate_idx = 0
-
-                # if current lap is complete, generate next track
-                if (self.last_gate_passed_idx == len(self.gate_poses_ground_truth)-1):
-                    self.finished_race = True
-
-                # if (not(self.last_gate_idx_moveOnSpline_was_called_on == self.next_gate_idx) and not self.finished_race):
-                if (not(self.last_gate_idx_moveOnSpline_was_called_on == self.next_gate_idx) and not self.finished_race):
-                    self.fly_to_next_gate_with_moveOnSpline()
-                    # print("moveOnSpline after next gate index is updated")
-                    # self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx
-
-            dist_from_next_gate
-
-            if self.detect_flag == True:
-                self.control_callback()
-            elif (self.detect_flag == False and self.previous_detect_flag == True):
+            ''' Control Part'''
+            if (self.detect_flag == True):
+                ''' Go to the center of the gate'''
+                # self.airsim_client.cancelLastTask()
                 self.fly_to_next_gate_with_moveOnSpline()
-                # print("moveOnSpline after lost gate detection")
-                # self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx
+            else:
+                ''' Go to prior of the gate'''
+                noisy_position_of_next_gate = self.gate_poses_ground_truth[self.next_gate_idx].position
+                target_position = convex_combination(drone_position, noisy_position_of_next_gate, 0.5)
+
+                self.fly_to_next_point_with_moveOnSpline(target_position)
 
         elif (self.finished_race == True and L2_norm(self.curr_lin_vel) < 0.5):
             # race is finished
-            self.reset_race()
+            
             self.finished_race == False
             self.terminated_program = True
             time.sleep(0.5)
+            
+            temp = [log_monitor.get_score_at_gate(str(i)) for i in range(1, FINISH_GATE_IDX + 2)]
+            current_race_time = [round(score[0] + score[1], 2) for score in temp]
+
+            print(f"best: {self.hyper_opt.best_hyper.time.tolist()}")
+            print(f"curr: {current_race_time}")
+
+            self.hyper_opt.save_curr_time(current_race_time)
+            self.dummy_reset()
             self.race_again()
         else:
             pass
 
-        self.previous_detect_flag = self.detect_flag
+    def log_curr_iter_data(self):
+        ## For the current iteration, write the best/current hyperparameter/time to the text file
+        data_logging.write(f"\niteration: {self.iteration}\n")
+        data_logging.flush()
+        data_logging.write(f"best: {self.hyper_opt.best_hyper.time.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"time: {self.hyper_opt.curr_hyper.time.tolist()}\n")
+        data_logging.flush()
 
-    def control_callback(self):
-        print("control_callback")
-        self.curr_time = time.time()
-        param_A = 13.401
-        param_B = -1.976
-        self.estimate_depth = param_A * np.exp(param_B * self.W)
+        data_logging.write(f"current_hyper_parameter\n")
+        data_logging.flush()
+        data_logging.write(f"v: {self.hyper_opt.curr_hyper.v.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"a: {self.hyper_opt.curr_hyper.a.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"d: {self.hyper_opt.curr_hyper.d.tolist()}\n")
+        data_logging.flush()
 
-        #############Control Gain param################
-        velocity_x_o = 3
-        Dist = 3
-        velocity_x = velocity_x_o + (self.estimate_depth - Dist)*0.187 - abs(self.distance_y_curr) * 0.2  #- abs(self.distance_z_curr) * 0.1
+        data_logging.write(f"BEST_hyper_parameter\n")
+        data_logging.flush()
+        data_logging.write(f"v: {self.hyper_opt.best_hyper.v.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"a: {self.hyper_opt.best_hyper.a.tolist()}\n")
+        data_logging.flush()
+        data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
+        data_logging.flush()
+
+    def get_new_hyper_for_next_race(self):
+        new_hyper = self.hyper_opt.random_mutation_from_best(num_mutation=2)
         
-        Vely_P_Gain = velocity_x*0.62 # 0.47 is good when vel 3.8 #0.9 is good when vel = 3 #0.43
-        Vely_D_Gain = velocity_x*0.17
-        Velz_P_Gain = velocity_x*0.62 # 0.49 is good when vel 3.8 #0.9 is good when vel = 3 #0.43
-        Velz_D_Gain = velocity_x*0.09
-        Yaw_P_Gain = velocity_x*0.7 #1.5 is good when vel = 3
-        Yaw_D_Gain = 0.07
+        return new_hyper
 
-        # error
-        self.distance_y_curr =  (1.5 * (self.Mx - 0.5) / self.W)
-        self.distance_z_curr =  (1.5 * (self.My - 0.48) / self.H)
-        self.desired_yaw_curr = math.atan2(self.distance_y_curr, self.estimate_depth) *57.2859
+    def use_new_hyper_for_next_race(self, new_hyper):
+        self.hyper_opt.curr_hyper = copy.deepcopy(new_hyper)
 
-        if self.chk_first_flag:
-            cmd_vel_x = velocity_x
-            cmd_vel_y = self.distance_y_curr*Vely_P_Gain
-            cmd_vel_z = self.distance_z_curr*Velz_P_Gain
-            cmd_yaw = self.desired_yaw_curr*Yaw_P_Gain
-            self.chk_first_flag = False
+    def race_again(self):
+        # data logging
+        self.log_curr_iter_data()
+
+        if self.hyper_opt.curr_win(): # update best hyperparameters only if wins
+            print("WIN")
+            self.hyper_opt.copy_curr_to_best_hyper()
+            self.hyper_opt.copy_curr_to_best_time()
         else:
-            dt = self.curr_time - self.prev_time
-            df_distance_y = (self.distance_y_curr - self.distance_y_prev)/dt
-            df_distance_z = (self.distance_z_curr - self.distance_z_prev)/dt
-            df_yaw = (self.desired_yaw_curr - self.desired_yaw_prev)/dt
+            print("LOSE")
+        
+        # for the new_hyper_for_next_race is from random search from the range
+        self.hyper_opt.curr_hyper.random_init_hypers()
 
-            #print("[df_y, df] | ", df_distance_y, dt)
+        self.iteration = self.iteration + 1
+        self.reset_drone_parameter()
+        self.start_race(1)
 
-            cmd_vel_x = velocity_x#velocity_x*(1+0.1*(self.estimate_depth-6))
-            cmd_vel_y = self.distance_y_curr*Vely_P_Gain + df_distance_y*Vely_D_Gain
-            cmd_vel_z = self.distance_z_curr*Velz_P_Gain + df_distance_z*Velz_D_Gain
-            cmd_yaw = self.desired_yaw_curr*Yaw_P_Gain + df_yaw*Yaw_D_Gain
-        velocity_mag = math.sqrt(cmd_vel_x**2 + cmd_vel_y**2 + cmd_vel_z**2)
+        print(f"================ iteration: {self.iteration} ================")
+        self.airsim_client.disableApiControl(vehicle_name="drone_2")
+        self.airsim_client.disarm(vehicle_name="drone_2")
+        self.takeoff_with_moveOnSpline()
+        self.get_ground_truth_gate_poses()
 
-        velocity_gain = ((1-self.vision_lam) * velocity_mag + self.vision_lam * self.prev_vel) / velocity_mag
-        cmd_vel_x *= velocity_gain
-        cmd_vel_y *= velocity_gain
-        cmd_vel_z *= velocity_gain
 
-        velocity_vector_drone = airsim.Vector3r(cmd_vel_x, cmd_vel_y, cmd_vel_z)
-        v_pose = self.airsim_client.simGetVehiclePose(vehicle_name="drone_1")
-        velocity_vector_world = self.get_world_frame_vel_from_drone_frame_vel(v_pose.orientation, velocity_vector_drone)
-        self.airsim_client.moveByVelocityAsync(velocity_vector_world.x_val, velocity_vector_world.y_val, velocity_vector_world.z_val, duration=0.05, yaw_mode=airsim.YawMode(True,cmd_yaw))
-        ################update variables###############
-        self.prev_time = self.curr_time
-        self.distance_y_prev = self.distance_y_curr
-        self.distance_z_prev = self.distance_z_curr
-        self.desired_yaw_prev = self.desired_yaw_curr
-        self.position_control_on = False
-        self.prev_vel = math.sqrt(velocity_vector_world.x_val ** 2 + velocity_vector_world.y_val ** 2 + velocity_vector_world.z_val ** 2)
-
-    def fly_to_first_gate_with_moveOnSpline(self):
-        # print("moveOnSpline")
-        # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
-        # print(self.curr_track_gate_poses[self.next_next_gate_idx].position)
-        self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth[self.next_gate_idx:]], 
-                                             vel_max=self.vel_max[self.next_gate_idx],
-                                             acc_max=self.acc_max[self.next_gate_idx], 
-                                             add_position_constraint=True, 
-                                             add_velocity_constraint=False, 
-                                             add_acceleration_constraint=False, 
-                                             viz_traj=self.viz_traj, 
-                                             viz_traj_color_rgba=self.viz_traj_color_rgba, 
-                                             vehicle_name=self.drone_name)
-    
     def fly_to_next_gate_with_moveOnSpline(self):
-        # print("moveOnSpline")
         # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
-        # print(self.curr_track_gate_poses[self.next_next_gate_idx].position)
-        self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth[self.next_gate_idx:]], 
-                                             vel_max=self.vel_max[self.next_gate_idx],
-                                             acc_max=self.acc_max[self.next_gate_idx], 
-                                             add_position_constraint=True, 
-                                             add_velocity_constraint=False, 
-                                             add_acceleration_constraint=False, 
-                                             replan_from_lookahead=True,
-                                             viz_traj=self.viz_traj, 
-                                             viz_traj_color_rgba=self.viz_traj_color_rgba, 
-                                             vehicle_name=self.drone_name)
-        self.last_gate_idx_moveOnSpline_was_called_on = self.next_gate_idx - 1
+        return self.airsim_client.moveOnSplineAsync([self.gate_poses_ground_truth[self.next_gate_idx].position], 
+                                                    vel_max=self.hyper_opt.curr_hyper.v[self.next_gate_idx],
+                                                    acc_max=self.hyper_opt.curr_hyper.a[self.next_gate_idx], 
+                                                    add_position_constraint=True, 
+                                                    add_velocity_constraint=True, 
+                                                    add_acceleration_constraint=True, 
+                                                    replan_from_lookahead=False,
+                                                    viz_traj=self.viz_traj, 
+                                                    viz_traj_color_rgba=self.viz_traj_color_rgba, 
+                                                    vehicle_name=self.drone_name)
 
-        # self.airsim_client.moveOnSplineAsync([gate_pose.position for gate_pose in self.gate_poses_ground_truth[self.next_gate_idx:]], 
-        #                                      vel_max=self.vel_max[self.next_gate_idx],
-        #                                      acc_max=self.acc_max[self.next_gate_idx], 
-        #                                      add_position_constraint=True, 
-        #                                      add_velocity_constraint=False, 
-        #                                      add_acceleration_constraint=False, 
-        #                                      viz_traj=self.viz_traj, 
-        #                                      viz_traj_color_rgba=self.viz_traj_color_rgba, 
-        #                                      vehicle_name=self.drone_name)
 
-    # call task() method every "period" seconds. 
+    def fly_to_next_point_with_moveOnSpline(self, point):
+        # print(self.gate_poses_ground_truth[self.next_gate_idx].position)
+        return self.airsim_client.moveOnSplineAsync([point],
+                                                    vel_max=self.hyper_opt.curr_hyper.v[self.next_gate_idx],
+                                                    acc_max=self.hyper_opt.curr_hyper.a[self.next_gate_idx], 
+                                                    add_position_constraint=True, 
+                                                    add_velocity_constraint=True, 
+                                                    add_acceleration_constraint=True, 
+                                                    replan_from_lookahead=False,
+                                                    viz_traj=self.viz_traj, 
+                                                    viz_traj_color_rgba=self.viz_traj_color_rgba, 
+                                                    vehicle_name=self.drone_name)
+
+    # call task() method every "period" seconds.
     def repeat_timer_image_callback(self, task, period):
         while self.is_image_thread_active:
             task()
@@ -525,11 +572,6 @@ class BaselineRacer(object):
             # self.odometry_callback_thread.join()
             print("Stopped odometry callback thread.")
 
-    def race_again(self):
-        self.start_race(1)
-        self.reset_drone_parameter()
-        self.takeoff_with_moveOnSpline()
-
 
 def main(args):
     # ensure you have generated the neurips planning settings file by running python generate_settings_file.py
@@ -539,25 +581,34 @@ def main(args):
     baseline_racer.start_race(args.race_tier)
     baseline_racer.get_ground_truth_gate_poses()
     baseline_racer.initialize_drone()
+    
+    # don't want opponent drone
+    baseline_racer.airsim_client.disableApiControl(vehicle_name="drone_2")
+    baseline_racer.airsim_client.disarm(vehicle_name="drone_2")
+    # hyper parameter initialization
+
+    # baseline_racer.initialize_drone_hyper_parameter(baseline_racer.hyper_opt.best_hyper)
+    
     baseline_racer.takeoff_with_moveOnSpline()
     baseline_racer.start_odometry_callback_thread()
 
-    # Comment out the following if you observe the python script exiting prematurely, and resetting the race 
-    # baseline_racer.stop_image_callback_thread()
-    # baseline_racer.stop_odometry_callback_thread()
-    # baseline_racer.reset_race()
+    print(f"================ iteration: 1 ================")
+
 
 
 if __name__ == "__main__":
     
     parser = ArgumentParser()
     parser.add_argument('--level_name', type=str, choices=["Soccer_Field_Easy", "Soccer_Field_Medium", "ZhangJiaJie_Medium", "Building99_Hard", 
-        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Soccer_Field_Medium")
+        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Qualifier_Tier_2")
     parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once","all_gates_one_by_one"], default="all_gates_at_once")
     parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
-    parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=True)
+    parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=False)
     parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=True)
     parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
     args = parser.parse_args()
-    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 0.0, 1.0], viz_image_cv2=args.viz_image_cv2)
+    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
+    log_monitor = log_monitor.LogMonitor()
+    data_logging = open("data_logging_random_search.txt", "w")
+
     main(args)
