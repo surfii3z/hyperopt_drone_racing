@@ -1,2 +1,4 @@
 baselines/__pycache__
 *pyc
+*.txt
+settings.json

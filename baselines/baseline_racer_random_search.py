@@ -157,10 +157,12 @@ class BaselineRacer(object):
         self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
         ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
-        # self.hyper_opt.best_hyper.v = np.array([12.0, 12.0, 34.98, 12.0, 20.96])
-        # self.hyper_opt.best_hyper.a = np.array([145.48, 50.0, 65.26, 50.0, 65.06])
-        # self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 3.5, 3.5, 2.0])
-        # self.hyper_opt.best_hyper.time = np.array([6.15, 8.25, 12.7, 16.64, 1000.0])
+        # self.hyper_opt.best_hyper.v = np.array([16.7, 33.22, 31.97, 28.64, 18.95, 17.24, 22.92, 29.94, 24.93, 17.79, 11.01, 22.89, 21.46, 10.12])
+        # self.hyper_opt.best_hyper.a = np.array([81.65, 114.28, 46.86, 58.83, 48.87, 108.65, 57.41, 59.12, 77.98, 65.46, 121.88, 49.9, 124.03, 74.1])
+        # self.hyper_opt.best_hyper.d = np.array([4.16, 4.84, 5.19, 3.84, 3.62, 6.29, 5.65, 4.2, 5.01, 5.02, 4.61, 5.65, 5.64, 4.56])
+        # self.hyper_opt.best_hyper.time = np.array([6.08, 7.51, 10.38, 13.24, 16.72, 20.04, 32.28, 35.32, 37.0, 38.96, 41.04, 43.53, 45.16, 46.21])
+        self.save_to_file_name = "data_logging_random_search3_9.txt"
+        # self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
         self.iteration = 1
     
@@ -609,6 +611,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
     log_monitor = log_monitor.LogMonitor()
-    data_logging = open("data_logging_random_search.txt", "w")
+    data_logging = open(baseline_racer.save_to_file_name, "a")
 
     main(args)

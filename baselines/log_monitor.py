@@ -4,7 +4,7 @@ import time
 
 disqualified_racers = set()
 finished_racers = set()
-PATH_TO_LOG = '/home/jedsadakorn/git/airsim_binary/AirSim_Qualification/AirSimExe/Saved/Logs/RaceLogs/'
+PATH_TO_LOG = '/home/usrg/god_ws/AirSim_Qualification/AirSimExe/Saved/Logs/RaceLogs/'
 class LogMonitor(object):
     def __init__(self, path_to_log=PATH_TO_LOG):
         self.path_to_log = path_to_log
