@@ -1,5 +1,5 @@
 # Hyperparamters Optimization in game of drones
-The approach is inspired by the winner (the report is available on the offcial website). It is the improve version of genetic algorithm (though)
+The approach is inspired by the winner (the report is available on the official website). It is the improve version of genetic algorithm (though)
 # Prerequisite
 1) Install game of drones binaries following the instructions from the official website
 `https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing`
