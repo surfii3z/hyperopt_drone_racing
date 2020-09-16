@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-import airsimneurips as airsim
+import airsimdroneracinglab as airsim
 import cv2
 import threading
 import time
@@ -38,6 +38,7 @@ MODEL_NAME = 'inference_graph'
 CWD_PATH = os.getcwd()
 PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, 'frozen_inference_graph.pb')
 PATH_TO_LABELS = os.path.join(CWD_PATH, 'training', 'labelmap.pbtxt')
+PATH_TO_LOG = '/home/jedsadakorn/git/AirSim-Drone-Racing-Lab/ADRL/ADRL/Saved/Logs/RaceLogs/'
 
 NUM_CLASSES = 1
 
@@ -610,7 +611,7 @@ if __name__ == "__main__":
     parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
     args = parser.parse_args()
     baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
-    log_monitor = log_monitor.LogMonitor()
+    log_monitor = log_monitor.LogMonitor(PATH_TO_LOG)
     data_logging = open(baseline_racer.save_to_file_name, "a")
 
     main(args)

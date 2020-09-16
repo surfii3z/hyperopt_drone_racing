@@ -182,7 +182,7 @@ class hyOpt(HyperParameter):
         ''' 
         idx = None
         for idx in reversed(range(self.num_hyper)):
-            if self.curr_hyper.time[-1] != 1000 and \
+            if self.best_hyper.time[-1] != 1000 and \
                 self.curr_hyper.time[idx] < self.best_hyper.time[idx] and \
                     abs(self.best_hyper.time[idx] - self.curr_hyper.time[idx]) > .5:
 
