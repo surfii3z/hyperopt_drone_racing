@@ -103,9 +103,16 @@ class hyOpt(HyperParameter):
                   up until where the best race loses
                 - random mutation (only random after the gate that the best time loses)
         '''
-        idx = self.get_curr_losing_idx()
-        self.copy_curr_to_best_hyper(idx)
-        self.copy_curr_to_best_time(idx)
+
+        idx = -1
+        if self.curr_win():
+            print("WIN")
+            self.copy_curr_to_best_hyper()
+            self.copy_curr_to_best_time()
+        else:
+            idx = self.get_curr_losing_idx()
+            self.copy_curr_to_best_hyper(idx)
+            self.copy_curr_to_best_time(idx)
 
         return idx
 
@@ -126,10 +133,10 @@ class hyOpt(HyperParameter):
             self.best_hyper.a[:idx] = self.curr_hyper.a[:idx]
             self.best_hyper.d[:idx] = self.curr_hyper.d[:idx]
         
-        if idx == len(self.best_hyper.time) - 1:
-            self.best_hyper.v[-1] = self.curr_hyper.v[-1]
-            self.best_hyper.a[-1] = self.curr_hyper.a[-1]
-            self.best_hyper.d[-1] = self.curr_hyper.d[-1]
+        # if idx == len(self.best_hyper.time) - 1:
+        #     self.best_hyper.v[-1] = self.curr_hyper.v[-1]
+        #     self.best_hyper.a[-1] = self.curr_hyper.a[-1]
+        #     self.best_hyper.d[-1] = self.curr_hyper.d[-1]
 
 
     def copy_curr_to_best_time(self, idx=-1):
@@ -139,9 +146,9 @@ class hyOpt(HyperParameter):
             # also copy the last element, if wins until the end 
             self.best_hyper.time[:idx] = self.curr_hyper.time[:idx]
         
-        if idx == len(self.best_hyper.time) - 1:   
-            # also copy the last element, if wins until the end 
-            self.best_hyper.time[-1] = self.curr_hyper.time[-1]
+        # if idx == len(self.best_hyper.time) - 1:   
+        #     # also copy the last element, if wins until the end 
+        #     self.best_hyper.time[-1] = self.curr_hyper.time[-1]
 
 
     
@@ -209,8 +216,9 @@ if __name__ == "__main__":
     opt.curr_hyper.init_time()
     opt.best_hyper.init_time()
     opt.best_hyper.time = [4, 3, 7, 8, 9, 10]
-    opt.curr_hyper.time = [20, 2, 0, 0, 0, 20]
+    opt.curr_hyper.time = [0, 2, 0, 0, 0, 9]
     idx = opt.update_best_hyper()
     print(opt.best_hyper)
+    print(opt.best_hyper.time)
 
 

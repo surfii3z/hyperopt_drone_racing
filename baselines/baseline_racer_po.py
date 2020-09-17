@@ -157,11 +157,11 @@ class BaselineRacer(object):
         self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
         # if the simulation crashes, continue from last iteration by putting best hyperparameters here
-        self.hyper_opt.best_hyper.v = np.array([9.67, 18.25, 12.0, 19.36, 12.0, 12.0, 12.0, 26.41, 12.0, 21.97, 21.18, 12.0, 12.0, 12.0])
-        self.hyper_opt.best_hyper.a = np.array([50.0, 50.0, 50.0, 39.45, 156.52, 118.01, 50.0, 50.0, 110.29, 50.0, 50.0, 50.0, 50.0, 50.0])
-        self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 5.3, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 2.0])
-        self.hyper_opt.best_hyper.time = np.array([6.92, 9.26, 13.49, 17.14, 20.36, 24.29, 42.06, 45.94, 47.88, 50.24, 51.92, 54.74, 57.56, 59.37])
-        self.logging_file_name = "po2_2.txt"
+        self.hyper_opt.best_hyper.v = np.array([28.69, 20.11, 32.55, 25.35, 21.52, 31.68, 15.22, 12.0, 12.0, 33.69, 12.0, 34.78, 12.0, 12.0])
+        self.hyper_opt.best_hyper.a = np.array([156.15, 27.17, 110.97, 90.33, 151.5, 50.0, 110.02, 50.0, 50.0, 50.0, 146.52, 50.0, 50.0, 50.0])
+        self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 5.17, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 3.5, 2.0])
+        self.hyper_opt.best_hyper.time = np.array([5.66, 7.22, 9.98, 12.34, 14.74, 19.56, 35.59, 40.61, 42.97, 45.42, 46.98, 49.55, 52.59, 54.45])
+        self.logging_file_name = "po4_3.txt"
         self.iteration = 1
     
 
