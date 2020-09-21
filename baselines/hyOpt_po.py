@@ -150,9 +150,7 @@ class hyOpt(HyperParameter):
         #     # also copy the last element, if wins until the end 
         #     self.best_hyper.time[-1] = self.curr_hyper.time[-1]
 
-
-    
-    def random_mutation_from_best(self, num_mutation, start_idx=0):
+    def random_mutation_from_best(self, num_mutation, end_idx=-1):
         '''
             if start_idx is specified from update_best_hyper(), it will reduce the search space
             because mutation is only allowed at the point after the gate that 
@@ -162,7 +160,13 @@ class hyOpt(HyperParameter):
         # end_idx = self.num_hyper - 1
         for _ in range(num_mutation):
             idx_1 = random.randint(0, 2)    # choose between v, a, or d
-            idx_2 = random.randint(0, start_idx)
+            # idx_2 = random.randint(0, start_idx)
+            if (end_idx == -1):
+                # case the current race wins the best
+                # random from anywhere
+                idx_2 = random.randint(0, self.num_hyper - 1)
+            else:
+                idx_2 = random.randint(0, end_idx)
             
             print(f"random_idx_1 = {idx_1}, random_idx_2 = {idx_2}")
 
@@ -176,7 +180,6 @@ class hyOpt(HyperParameter):
         new_hyper.d[-1] = 2 # to ensure that the drone passes the last gate
         
         return new_hyper
-
 
     def get_curr_losing_idx(self):
         '''
