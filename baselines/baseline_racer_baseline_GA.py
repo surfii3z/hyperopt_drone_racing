@@ -36,6 +36,7 @@ FINISH_GATE_IDX = 13
 
 MODEL_NAME = 'inference_graph'
 CWD_PATH = os.getcwd()
+print(CWD_PATH)
 PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, 'frozen_inference_graph.pb')
 PATH_TO_LABELS = os.path.join(CWD_PATH, 'training', 'labelmap.pbtxt')
 
