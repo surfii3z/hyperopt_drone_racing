@@ -21,7 +21,7 @@ python baseline_racer_baseline_GA.py
 # Result
 https://drive.google.com/open?id=1fdOiCOEi4pfexpmxc5TYRRgIfK8mZU0AeVxHSTPYrJ0
 
-# example of hyperparameters found by each algorithm after 200 iterations
+# Example of hyperparameters found by each algorithm after 200 iterations
 ```
 Map: ZhangJiajie_Medium
 Number of gates: 14
