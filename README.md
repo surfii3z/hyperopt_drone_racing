@@ -3,11 +3,12 @@ The approach is inspired by the winner (the report is available on the official 
 # Prerequisite
 1) Install game of drones binaries following the instructions from the official website
 
-`https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing`
+[airsim_neurips2019](https://github.com/microsoft/AirSim-NeurIPS2019-Drone-Racing)
 
 2) Install tensorflow object detection API (used for gate detection)
 
-`https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/tf1.md`
+[tensorflow 1 object detection API](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/tf1.md)
+
 3) python >= 3.6
 # Run
 Open two terminals
