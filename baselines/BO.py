@@ -25,7 +25,7 @@ hyper_parameters = hyOpt.HyperParameter(NUM_HYPER)
 hyper_parameters.init_hypers(12, 50, 3.5)
 hyper_parameters.init_time()
 
-save_to_file_name = "test_log_BO.txt"
+save_to_file_name = "BO00.txt"
 data_logging = open(save_to_file_name, "a")
 
 def objective(trial):
@@ -88,11 +88,25 @@ def log_data():
     data_logging.write(f"d: {best_hyper_parameters.d.tolist()}\n")
     data_logging.flush()
 
+def retrieve_best_param(study):
+    for i in range(NUM_HYPER):
+        best_hyper_parameters.v[i] = np.round(study.best_params['v_{}'.format(i)], 2)
+        best_hyper_parameters.a[i] = np.round(study.best_params['a_{}'.format(i)], 2)
+        best_hyper_parameters.d[i] = np.round(study.best_params['d_{}'.format(i)], 2)
+    
+    best_hyper_parameters.time[-1] = np.round(study.best_value, 2)
+    return best_hyper_parameters
+
 
 if __name__ == '__main__':
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study()
-    joblib.dump(study, 'study.pkl')
-    study.optimize(objective, n_trials=30)
+    study = optuna.create_study(study_name='GOD_BO', storage='sqlite:///GOD_BO.db', load_if_exists=True)
+    if len(study.trials) > 0:
+        ITERATION = study.trials[-1]._trial_id
+        BEST_TIME = study.best_value
+        best_hyper_parameters = retrieve_best_param(study)
+        
+
+    study.optimize(objective, n_trials=200)
 
     print(study.best_params)  # E.g. {'x': 2.002108042}
