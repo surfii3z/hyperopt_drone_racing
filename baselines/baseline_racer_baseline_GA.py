@@ -162,6 +162,7 @@ class BaselineRacer(object):
         # self.hyper_opt.best_hyper.a = np.array([145.48, 50.0, 65.26, 50.0, 65.06])
         # self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 3.5, 3.5, 2.0])
         # self.hyper_opt.best_hyper.time = np.array([6.15, 8.25, 12.7, 16.64, 1000.0])
+        self.save_to_file_name = "data_logging_baseline.txt"
 
         self.iteration = 1
     
@@ -490,8 +491,6 @@ class BaselineRacer(object):
         # data logging
         self.log_curr_iter_data()
 
-        # new_hyper = self.get_new_hyper_for_next_race()
-
         if self.hyper_opt.curr_win(): # update best hyperparameters only if wins
             print("WIN")
             self.hyper_opt.copy_curr_to_best_hyper()
@@ -613,6 +612,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
     log_monitor = log_monitor.LogMonitor()
-    data_logging = open("data_logging_baseline.txt", "w")
+    data_logging = open(baseline_racer.save_to_file_name, "a")
 
     main(args)

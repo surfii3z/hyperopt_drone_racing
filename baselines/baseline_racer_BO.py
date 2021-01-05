@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
-import airsimneurips as airsim
+# import airsimneurips as airsim
+import airsimdroneracinglab as airsim
 import cv2
 import threading
 import time
@@ -11,6 +12,8 @@ import copy
 import random
 import log_monitor
 import hyOpt
+
+import optuna
 
 ## for gate detection
 import tensorflow as tf
@@ -30,8 +33,9 @@ A_MAX = 160
 D_MIN = 3.5
 D_MAX = 6.5
 
-FINISH_GATE_IDX = 13
 
+# FINISH_GATE_IDX = 13
+FINISH_GATE_IDX = 13
 ## for gate detection
 
 MODEL_NAME = 'inference_graph'
@@ -116,6 +120,8 @@ class BaselineRacer(object):
         self.viz_traj = viz_traj
         self.viz_traj_color_rgba = viz_traj_color_rgba
 
+        self.log_monitor = log_monitor.LogMonitor()
+
         self.airsim_client = airsim.MultirotorClient()
         self.airsim_client.confirmConnection()
         # we need two airsim MultirotorClient objects because the comm lib we use (rpclib) is not thread safe
@@ -161,10 +167,14 @@ class BaselineRacer(object):
         # self.hyper_opt.best_hyper.a = np.array([81.65, 114.28, 46.86, 58.83, 48.87, 108.65, 57.41, 59.12, 77.98, 65.46, 121.88, 49.9, 124.03, 74.1])
         # self.hyper_opt.best_hyper.d = np.array([4.16, 4.84, 5.19, 3.84, 3.62, 6.29, 5.65, 4.2, 5.01, 5.02, 4.61, 5.65, 5.64, 4.56])
         # self.hyper_opt.best_hyper.time = np.array([6.08, 7.51, 10.38, 13.24, 16.72, 20.04, 32.28, 35.32, 37.0, 38.96, 41.04, 43.53, 45.16, 46.21])
-        self.save_to_file_name = "data_logging_random_search3_9.txt"
+
+        self.save_to_file_name = "testaa.txt"
+        self.data_logging = open(self.save_to_file_name, "a")
+
         # self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
         self.iteration = 1
+        self.racing_started = False
     
 
     # loads desired level
@@ -189,6 +199,7 @@ class BaselineRacer(object):
         time.sleep(0.1)
         self.airsim_client.enableApiControl(vehicle_name=self.drone_name)
         self.airsim_client.arm(vehicle_name=self.drone_name)
+        self.reset_drone_parameter()
 
 
     # arms drone, enable APIs, set default traj tracker gains
@@ -232,6 +243,8 @@ class BaselineRacer(object):
 
         self.airsim_client.moveOnSplineAsync([takeoff_waypoint], vel_max=15.0, acc_max=5.0, add_position_constraint=True, add_velocity_constraint=False, 
             add_acceleration_constraint=False, viz_traj=self.viz_traj, viz_traj_color_rgba=self.viz_traj_color_rgba, vehicle_name=self.drone_name).join()
+        
+        self.racing_started = True
 
     # stores gate ground truth poses as a list of airsim.Pose() objects in self.gate_poses_ground_truth
     def get_ground_truth_gate_poses(self):
@@ -307,19 +320,19 @@ class BaselineRacer(object):
         return early_terminate_condition
 
     def is_slower_than_last_race(self):
-        early_terminate_condition = log_monitor.get_current_race_time() > self.hyper_opt.best_hyper.time[-1]
+        early_terminate_condition = self.log_monitor.get_current_race_time() > self.hyper_opt.best_hyper.time[-1]
         if early_terminate_condition:
             print("     EARLY TERMINATION: slower than the best racorded time")
         return early_terminate_condition
 
     def is_drone_missed_some_gate(self):
-        early_terminate_condition = log_monitor.check_gate_missed()
+        early_terminate_condition = self.log_monitor.check_gate_missed()
         if early_terminate_condition:
             print("     EARLY TERMINATION: drone missed some gate")
         return early_terminate_condition
 
     def is_drone_collied(self):
-        early_terminate_condition = log_monitor.check_collision()
+        early_terminate_condition = self.log_monitor.check_collision()
         if early_terminate_condition:
             print("     EARLY TERMINATION: drone collided")
         return early_terminate_condition
@@ -340,6 +353,7 @@ class BaselineRacer(object):
             H_list = []
             W_list = []
             if N >= 1:  # in the case of more than one gates are detected, we want to select the nearest gate (biggest bounding box)
+                # print("detect something")
                 for element in boxes_detected:
                     H_list.append(element[2] - element[0])
                     W_list.append(element[3] - element[1])
@@ -405,7 +419,7 @@ class BaselineRacer(object):
         self.curr_xyz = [drone_position.x_val, drone_position.y_val, drone_position.z_val]
         self.got_odom = True
 
-        if (self.finished_race == False):
+        if self.racing_started and not self.finished_race:
             if self.is_gate_passed():
                 self.update_gate_idx_trackers()
             
@@ -440,46 +454,52 @@ class BaselineRacer(object):
             self.terminated_program = True
             time.sleep(0.5)
             
-            temp = [log_monitor.get_score_at_gate(str(i)) for i in range(1, FINISH_GATE_IDX + 2)]
+            temp = [self.log_monitor.get_score_at_gate(str(i)) for i in range(1, FINISH_GATE_IDX + 2)]
             current_race_time = [round(score[0] + score[1], 2) for score in temp]
 
-            print(f"best: {self.hyper_opt.best_hyper.time.tolist()}")
+            # print(f"best: {self.hyper_opt.best_hyper.time.tolist()}")
             print(f"curr: {current_race_time}")
 
             self.hyper_opt.save_curr_time(current_race_time)
             self.dummy_reset()
-            self.race_again()
+            self.finished_race = False
+            self.racing_started = False
+
+            self.is_odometry_thread_active = False
+            self.is_image_thread_active = False
+            # self.log_curr_iter_data()
+
         else:
             pass
 
     def log_curr_iter_data(self):
         ## For the current iteration, write the best/current hyperparameter/time to the text file
-        data_logging.write(f"\niteration: {self.iteration}\n")
-        data_logging.flush()
-        data_logging.write(f"best: {self.hyper_opt.best_hyper.time.tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"time: {self.hyper_opt.curr_hyper.time.tolist()}\n")
-        data_logging.flush()
+        self.data_logging.write(f"\niteration: {self.iteration}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"best: {self.hyper_opt.best_hyper.time.tolist()}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"time: {self.hyper_opt.curr_hyper.time.tolist()}\n")
+        self.data_logging.flush()
 
-        data_logging.write(f"current_hyper_parameter\n")
-        data_logging.flush()
-        data_logging.write(f"v: {self.hyper_opt.curr_hyper.v.tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"a: {self.hyper_opt.curr_hyper.a.tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"d: {self.hyper_opt.curr_hyper.d.tolist()}\n")
-        data_logging.flush()
+        self.data_logging.write(f"current_hyper_parameter\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"v: {self.hyper_opt.curr_hyper.v.tolist()}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"a: {self.hyper_opt.curr_hyper.a.tolist()}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"d: {self.hyper_opt.curr_hyper.d.tolist()}\n")
+        self.data_logging.flush()
 
-        data_logging.write(f"BEST_hyper_parameter\n")
-        data_logging.flush()
-        data_logging.write(f"v: {self.hyper_opt.best_hyper.v.tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"a: {self.hyper_opt.best_hyper.a.tolist()}\n")
-        data_logging.flush()
-        data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
-        data_logging.flush()
+        self.data_logging.write(f"BEST_hyper_parameter\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"v: {self.hyper_opt.best_hyper.v.tolist()}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"a: {self.hyper_opt.best_hyper.a.tolist()}\n")
+        self.data_logging.flush()
+        self.data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
+        self.data_logging.flush()
+
         
-        return new_hyper
 
     def use_new_hyper_for_next_race(self, new_hyper):
         self.hyper_opt.curr_hyper = copy.deepcopy(new_hyper)
@@ -488,18 +508,18 @@ class BaselineRacer(object):
         # data logging
         self.log_curr_iter_data()
 
-        if self.hyper_opt.curr_win(): # update best hyperparameters only if wins
-            print("WIN")
-            self.hyper_opt.copy_curr_to_best_hyper()
-            self.hyper_opt.copy_curr_to_best_time()
-        else:
-            print("LOSE")
+        # if self.hyper_opt.curr_win(): # update best hyperparameters only if wins
+        #     print("WIN")
+        #     self.hyper_opt.copy_curr_to_best_hyper()
+        #     self.hyper_opt.copy_curr_to_best_time()
+        # else:
+        #     print("LOSE")
         
         # for the new_hyper_for_next_race is from random search from the range
         self.hyper_opt.curr_hyper.random_init_hypers()
 
         self.iteration = self.iteration + 1
-        self.reset_drone_parameter()
+        
         self.start_race(1)
 
         print(f"================ iteration: {self.iteration} ================")
@@ -507,6 +527,9 @@ class BaselineRacer(object):
         self.airsim_client.disarm(vehicle_name="drone_2")
         self.takeoff_with_moveOnSpline()
         self.get_ground_truth_gate_poses()
+
+        self.is_odometry_thread_active = True
+        self.is_image_thread_active = True
 
 
     def fly_to_next_gate_with_moveOnSpline(self):
@@ -568,13 +591,23 @@ class BaselineRacer(object):
     def stop_odometry_callback_thread(self):
         if self.is_odometry_thread_active:
             self.is_odometry_thread_active = False
-            # self.odometry_callback_thread.join()
+            self.odometry_callback_thread.join()
             print("Stopped odometry callback thread.")
 
 
-def main(args):
-    # ensure you have generated the neurips planning settings file by running python generate_settings_file.py
+def main(hyperparameters=None, best_time=1000):
+
+    parser = ArgumentParser()
+    parser.add_argument('--level_name', type=str, choices=["Qualifier_Tier_2"], default="Qualifier_Tier_2")
+    parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once"], default="all_gates_at_once")
+    parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline"], default="moveOnSpline")
+    parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=False)
+    parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=False)
+    parser.add_argument('--race_tier', type=int, choices=[1], default=1)
+    args = parser.parse_args()
+    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
     
+    # ensure you have generated the neurips planning settings file by running python generate_settings_file.py    
     baseline_racer.load_level(args.level_name)
     baseline_racer.start_image_callback_thread()
     baseline_racer.start_race(args.race_tier)
@@ -587,27 +620,24 @@ def main(args):
     # hyper parameter initialization
 
     # baseline_racer.initialize_drone_hyper_parameter(baseline_racer.hyper_opt.best_hyper)
+
+    if hyperparameters != None:
+        baseline_racer.use_new_hyper_for_next_race(hyperparameters)
+    else:
+        baseline_racer.use_new_hyper_for_next_race(baseline_racer.hyper_opt.best_hyper)
+
+    baseline_racer.hyper_opt.best_hyper.time[-1] = best_time
     
     baseline_racer.takeoff_with_moveOnSpline()
     baseline_racer.start_odometry_callback_thread()
 
-    print(f"================ iteration: 1 ================")
+    # print(f"================ iteration: 1 ================")
 
+    while baseline_racer.is_odometry_thread_active:
+        time.sleep(1e-4)
+        
+    return baseline_racer.hyper_opt.curr_hyper.time
 
 
 if __name__ == "__main__":
-    
-    parser = ArgumentParser()
-    parser.add_argument('--level_name', type=str, choices=["Soccer_Field_Easy", "Soccer_Field_Medium", "ZhangJiaJie_Medium", "Building99_Hard", 
-        "Qualifier_Tier_1", "Qualifier_Tier_2", "Qualifier_Tier_3", "Final_Tier_1", "Final_Tier_2", "Final_Tier_3"], default="Qualifier_Tier_2")
-    parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once","all_gates_one_by_one"], default="all_gates_at_once")
-    parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
-    parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=False)
-    parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=True)
-    parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
-    args = parser.parse_args()
-    baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)
-    log_monitor = log_monitor.LogMonitor()
-    data_logging = open(baseline_racer.save_to_file_name, "a")
-
-    main(args)
+    main()

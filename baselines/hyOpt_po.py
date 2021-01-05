@@ -198,15 +198,8 @@ class hyOpt(HyperParameter):
             if self.curr_hyper.time[idx] > self.best_hyper.time[idx] and \
                 abs(self.best_hyper.time[idx] - self.curr_hyper.time[idx]) > .5:
                     break
-            # else:
-            #     # if idx != (self.num_hyper - 1) \
-            #     #         and self.curr_hyper.time[idx + 1] != 1000: # need to pass the next gate
-            #     #         break
-            #     break
 
         out_idx = idx
-        # if idx > 0 and idx != len(self.best_hyper.time) - 1:
-        #     out_idx = idx - 1 
                     
         print(f"Lose at = {out_idx}")
         return out_idx              
