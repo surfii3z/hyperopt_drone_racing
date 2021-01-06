@@ -24,8 +24,8 @@ best_hyper_parameters.init_time()
 hyper_parameters = hyOpt.HyperParameter(NUM_HYPER)
 hyper_parameters.init_hypers(12, 50, 3.5)
 hyper_parameters.init_time()
-
-save_to_file_name = "BO00.txt"
+NAME = 'BO02'
+save_to_file_name = "{}.txt".format(NAME)
 data_logging = open(save_to_file_name, "a")
 
 def objective(trial):
@@ -100,7 +100,7 @@ def retrieve_best_param(study):
 
 if __name__ == '__main__':
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(study_name='GOD_BO', storage='sqlite:///GOD_BO.db', load_if_exists=True)
+    study = optuna.create_study(study_name=NAME, storage='sqlite:///{}.db'.format(NAME), load_if_exists=True)
     if len(study.trials) > 0:
         ITERATION = study.trials[-1]._trial_id
         BEST_TIME = study.best_value
