@@ -24,7 +24,7 @@ best_hyper_parameters.init_time()
 hyper_parameters = hyOpt.HyperParameter(NUM_HYPER)
 hyper_parameters.init_hypers(12, 50, 3.5)
 hyper_parameters.init_time()
-NAME = 'BO02'
+NAME = 'BO_no_slower_00'
 save_to_file_name = "{}.txt".format(NAME)
 data_logging = open(save_to_file_name, "a")
 
@@ -107,6 +107,6 @@ if __name__ == '__main__':
         best_hyper_parameters = retrieve_best_param(study)
         
 
-    study.optimize(objective, n_trials=200)
+    study.optimize(objective, n_trials=1000)
 
     print(study.best_params)  # E.g. {'x': 2.002108042}
