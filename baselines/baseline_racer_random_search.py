@@ -10,6 +10,7 @@ import os
 import copy
 import random
 import log_monitor
+from retrieve_best import *
 import hyOpt
 
 ## for gate detection
@@ -156,15 +157,23 @@ class BaselineRacer(object):
         self.hyper_opt.best_hyper.init_time()
         self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
-        ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
-        # self.hyper_opt.best_hyper.v = np.array([16.7, 33.22, 31.97, 28.64, 18.95, 17.24, 22.92, 29.94, 24.93, 17.79, 11.01, 22.89, 21.46, 10.12])
-        # self.hyper_opt.best_hyper.a = np.array([81.65, 114.28, 46.86, 58.83, 48.87, 108.65, 57.41, 59.12, 77.98, 65.46, 121.88, 49.9, 124.03, 74.1])
-        # self.hyper_opt.best_hyper.d = np.array([4.16, 4.84, 5.19, 3.84, 3.62, 6.29, 5.65, 4.2, 5.01, 5.02, 4.61, 5.65, 5.64, 4.56])
-        # self.hyper_opt.best_hyper.time = np.array([6.08, 7.51, 10.38, 13.24, 16.72, 20.04, 32.28, 35.32, 37.0, 38.96, 41.04, 43.53, 45.16, 46.21])
-        self.save_to_file_name = "data_logging_random_search3_9.txt"
-        # self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
 
-        self.iteration = 1
+        ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
+        self.save_to_file_name = "data_logging_random_search10.txt"
+        last_iter = 0
+
+        path = '/home/usrg/god_ws/hyperopt_ea_game_of_drones/baselines/'
+        last_iter, best_time, best_v, best_a, best_d = retrieve_best(path + self.save_to_file_name)
+       
+        self.hyper_opt.best_hyper.v = np.array(best_v)
+        self.hyper_opt.best_hyper.a = np.array(best_a)
+        self.hyper_opt.best_hyper.d = np.array(best_d)
+        self.hyper_opt.best_hyper.time = np.array(best_time)
+        self.hyper_opt.curr_hyper.random_init_hypers()
+        
+
+
+        self.iteration = last_iter + 1
     
 
     # loads desired level
@@ -479,7 +488,7 @@ class BaselineRacer(object):
         data_logging.write(f"d: {self.hyper_opt.best_hyper.d.tolist()}\n")
         data_logging.flush()
         
-        return new_hyper
+        # return new_hyper
 
     def use_new_hyper_for_next_race(self, new_hyper):
         self.hyper_opt.curr_hyper = copy.deepcopy(new_hyper)
@@ -591,7 +600,7 @@ def main(args):
     baseline_racer.takeoff_with_moveOnSpline()
     baseline_racer.start_odometry_callback_thread()
 
-    print(f"================ iteration: 1 ================")
+    print(f"================ iteration: {baseline_racer.iteration} ================")
 
 
 
@@ -603,7 +612,7 @@ if __name__ == "__main__":
     parser.add_argument('--planning_baseline_type', type=str, choices=["all_gates_at_once","all_gates_one_by_one"], default="all_gates_at_once")
     parser.add_argument('--planning_and_control_api', type=str, choices=["moveOnSpline", "moveOnSplineVelConstraints"], default="moveOnSpline")
     parser.add_argument('--enable_viz_traj', dest='viz_traj', action='store_true', default=False)
-    parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=True)
+    parser.add_argument('--enable_viz_image_cv2', dest='viz_image_cv2', action='store_true', default=False)
     parser.add_argument('--race_tier', type=int, choices=[1,2,3], default=1)
     args = parser.parse_args()
     baseline_racer = BaselineRacer(drone_name="drone_1", viz_traj=args.viz_traj, viz_traj_color_rgba=[1.0, 1.0, 1.0, 1.0], viz_image_cv2=args.viz_image_cv2)

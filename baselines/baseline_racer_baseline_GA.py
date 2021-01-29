@@ -10,6 +10,7 @@ import os
 import copy
 import random
 import log_monitor
+from retrieve_best import *
 import hyOpt
 
 ## for gate detection
@@ -155,16 +156,23 @@ class BaselineRacer(object):
         self.hyper_opt.best_hyper.set_d_range((D_MIN, D_MAX))
         self.hyper_opt.best_hyper.init_hypers(12, 50, 3.5)
         self.hyper_opt.best_hyper.init_time()
-        self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
+        
 
         ## if the simulation crashes, continue from last iteration by putting best hyperparameters here
-        # self.hyper_opt.best_hyper.v = np.array([12.0, 12.0, 34.98, 12.0, 20.96])
-        # self.hyper_opt.best_hyper.a = np.array([145.48, 50.0, 65.26, 50.0, 65.06])
-        # self.hyper_opt.best_hyper.d = np.array([3.5, 3.5, 3.5, 3.5, 2.0])
-        # self.hyper_opt.best_hyper.time = np.array([6.15, 8.25, 12.7, 16.64, 1000.0])
-        self.save_to_file_name = "data_logging_baseline.txt"
+        self.save_to_file_name = "baseline01.txt"
+        last_iter = 0
 
-        self.iteration = 1
+        path = '/home/usrg/god_ws/hyperopt_ea_game_of_drones/baselines/'
+        last_iter, best_time, best_v, best_a, best_d = retrieve_best(path + self.save_to_file_name)
+       
+        self.hyper_opt.best_hyper.v = np.array(best_v)
+        self.hyper_opt.best_hyper.a = np.array(best_a)
+        self.hyper_opt.best_hyper.d = np.array(best_d)
+        self.hyper_opt.best_hyper.time = np.array(best_time)
+
+
+        self.use_new_hyper_for_next_race(self.hyper_opt.best_hyper)
+        self.iteration = last_iter + 1
     
 
     # loads desired level
@@ -595,7 +603,7 @@ def main(args):
     baseline_racer.takeoff_with_moveOnSpline()
     baseline_racer.start_odometry_callback_thread()
 
-    print(f"================ iteration: 1 ================")
+    print(f"================ iteration: {baseline_racer.iteration} ================")
 
 
 

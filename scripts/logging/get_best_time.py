@@ -1,4 +1,4 @@
-FILE_PATH = "/home/usrg/god_ws/hyperopt_ea_game_of_drones/baselines/BO04.txt"
+FILE_PATH = "/home/usrg/god_ws/hyperopt_ea_game_of_drones/baselines/BO03.txt"
 
 ''' 
 Print the best time in the log file

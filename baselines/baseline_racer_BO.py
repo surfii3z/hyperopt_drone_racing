@@ -426,8 +426,8 @@ class BaselineRacer(object):
             # condition to terminate the race
             if self.is_race_finished() or \
                self.is_drone_stucked() or \
-               self.is_slower_than_last_race() or \
                self.is_drone_missed_some_gate():
+            #    self.is_slower_than_last_race() or \
             #    self.is_drone_collied():
                 self.finished_race = True
                 time.sleep(1.0)

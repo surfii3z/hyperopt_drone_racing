@@ -24,7 +24,7 @@ best_hyper_parameters.init_time()
 hyper_parameters = hyOpt.HyperParameter(NUM_HYPER)
 hyper_parameters.init_hypers(12, 50, 3.5)
 hyper_parameters.init_time()
-NAME = 'BO_no_slower_00'
+NAME = 'BO_no_slower_09'
 save_to_file_name = "{}.txt".format(NAME)
 data_logging = open(save_to_file_name, "a")
 
