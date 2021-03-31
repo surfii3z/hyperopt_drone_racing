@@ -186,9 +186,11 @@ class hyOpt(HyperParameter):
                 self.curr_hyper.time[idx] < self.best_hyper.time[idx] and \
                     abs(self.best_hyper.time[idx] - self.curr_hyper.time[idx]) > .5:
 
-                    if idx != (self.num_hyper - 1) \
-                        and self.curr_hyper.time[idx + 1] != 1000: # need to pass the next gate
-                        break
+                    # if idx != (self.num_hyper - 1) \
+                    #     and self.curr_hyper.time[idx + 1] != 1000: # need to pass the next gate
+                        # break
+                        
+                    break
                     
         print(f"Current win until at idx = {idx}")
         return idx              

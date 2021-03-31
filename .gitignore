@@ -3,3 +3,5 @@ baselines/__pycache__
 *.txt
 settings.json
 *.pkl
+
+.vscode/
