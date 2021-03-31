@@ -23,7 +23,7 @@ cd /path/to/hyperopt_ea_game_of_drones/baselines
 python baseline_racer_baseline_GA.py
 ```
 # Result
-https://drive.google.com/open?id=1fdOiCOEi4pfexpmxc5TYRRgIfK8mZU0AeVxHSTPYrJ0
+https://docs.google.com/presentation/d/15Ji3PlZ-SBxpDjpm1BdEuDm6ERNtocofC-S8EgZiPAM/edit?usp=sharing
 
 # Example of hyperparameters found by each algorithm after 200 iterations
 ```
